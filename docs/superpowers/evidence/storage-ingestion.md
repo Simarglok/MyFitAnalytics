@@ -25,11 +25,11 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 | Archive/DB transaction failure is retryable after inbox cleanup | `canonical_transaction_failure_retries_a_registered_asset_after_archive_verification`; gate transaction phase |
 | Registration crash window retains the immutable archive for later retry | `registration_failure_keeps_archive_for_a_later_retry` |
 | Startup and Refresh Now reconcile archive-only assets into active data | `mfa-ingestion/tests/reconciliation.rs::startup_and_refresh_reconcile_archive_only_assets_into_active_snapshots` |
-| Startup crash reconciliation and recovery gate | `mfa-ingestion/tests/recovery.rs::startup_recovery_marks_interrupted_attempts_before_releasing_ingestion_gate`; gate recovery phase |
+| Startup crash reconciliation and recovery gate | `mfa-ingestion/tests/recovery.rs::startup_recovery_marks_interrupted_attempts_before_releasing_ingestion_gate`; `multi_source_recovery_marks_interrupted_once_before_releasing_gate`; gate recovery phase |
 | Failed replacement leaves active snapshot unchanged | `mfa-db/tests/fault_injection.rs::active_snapshot_failure_keeps_the_previous_snapshot_visible`; `injected_rebuild_swap_failure_reopens_the_original_database` |
 | Immutable archive rebuild | `mfa-ingestion/tests/rebuild.rs::rebuild_uses_a_temporary_actor_and_keeps_an_immutable_recovery_copy`; production importer test; gate rebuild phase |
 | Manual retry creates a fresh attempt | `manual_retry_replays_an_archived_asset_with_a_new_attempt_identity` |
-| Every post-attempt failure closes the attempt immediately | `build_batch_failure_marks_attempt_failed_immediately`; `build_and_validation_failures_mark_attempt_failed_immediately`; `extension_contract_registration_failure_marks_attempt_failed_immediately`; `manual_retry_guest_failure_marks_its_attempt_failed_immediately`; production rebuild importer status test |
+| Every post-attempt failure closes the attempt immediately | `build_batch_failure_marks_attempt_failed_immediately`; `build_and_validation_failures_mark_attempt_failed_immediately`; `extension_contract_registration_failure_marks_attempt_failed_immediately`; `manual_retry_guest_failure_marks_its_attempt_failed_immediately`; `pipeline::tests::poisoned_post_attempt_state_lock_is_reported`; production rebuild importer status test |
 | All enabled sources share one actor with independent coordinators | `myfitanalytics/tests/ingestion_commands.rs::refresh_scans_all_enabled_sources_with_independent_health`; `thirty_two_concurrent_query_and_refresh_commands_share_one_actor` |
 | Single actor ownership | `mfa-db/tests/actor_ownership.rs` (3 passed); no Tauri/archive code imports DuckDB |
 | 32 concurrent desktop calls | `myfitanalytics/tests/ingestion_commands.rs::thirty_two_concurrent_query_and_refresh_commands_share_one_actor` |
@@ -42,10 +42,12 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 - Task 6 `cargo test -p myfitanalytics --test ingestion_commands` first failed with missing storage command/runtime symbols, then passed with 6 tests.
 - Task 6 `svelte-check` first failed because the new typed transport methods were absent, then passed after the transport/types/mock adapters were implemented.
 - The frontend boundary suite initially failed under browser resolution for Node filesystem imports; the per-file Node environment annotation fixed that scoped test, and the exact frontend gate now passes (3 files, 5 tests).
+- Independent-review correction tracers were observed red for the missing global multi-source recovery seam and poisoned post-attempt lock helper, then passed after `ee4ab2c`.
 
 ## Architecture evidence
 
 - `DatabaseService` remains the only DuckDB owner; Tauri state stores cloneable channel handles and never opens DuckDB.
+- Multi-source startup performs global interrupted-attempt marking once, reconciles every source while the recovery gate remains blocked, and only then starts coordinators/scans.
 - Archive scanning, hashing, source parsing, and archive filesystem operations stay outside the actor; inbox cleanup follows verified archive/duplicate confirmation and failed parsing remains recoverable from the archive.
 - Tauri commands validate/map DTOs and do not hold state locks over awaits.
 - `data-changed` emits only capability/dashboard IDs; every enabled source coordinator forwards through the same sink, and the Svelte app reloads view models through `AppTransport`.
@@ -53,7 +55,7 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 
 ## Fresh final verification
 
-All commands below were run after implementation commit `a565484` and returned exit 0:
+All commands below were run after implementation commit `ee4ab2c` and returned exit 0:
 
 | Command | Result |
 | --- | --- |
@@ -65,4 +67,4 @@ All commands below were run after implementation commit `a565484` and returned e
 | `pnpm --dir web build` | Vite production build passed; 118 modules transformed |
 | `./scripts/storage-ingestion-gate.sh` | 1 storage-gate test and 6 Tauri command tests passed |
 | `git diff --check` | Passed |
-| `git status --short --branch` | Clean after the evidence follow-up commit; `feat/storage-ingestion...origin/main [ahead 9]` |
+| `git status --short --branch` | Clean after the evidence follow-up commit; `feat/storage-ingestion...origin/main [ahead 11]` |
