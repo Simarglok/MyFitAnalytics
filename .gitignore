@@ -1,0 +1,20 @@
+.DS_Store
+**/.DS_Store
+
+/target/
+/node_modules/
+**/node_modules/
+/web/dist/
+/dist/modules/
+
+# Local toolchains and build caches
+/.tools/
+/.cargo/
+
+# Native build output
+/src-tauri/target/
+
+# Generated module packages
+*.mfasource
+*.mfadashboard
+*.mfalocale

@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Minimal capabilities for the MyFitAnalytics main window","local":true,"windows":["main"],"permissions":["core:default"]}}
