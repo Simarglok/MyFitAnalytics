@@ -25,7 +25,7 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 | Archive/DB transaction failure is retryable after inbox cleanup | `canonical_transaction_failure_retries_a_registered_asset_after_archive_verification`; gate transaction phase |
 | Registration crash window retains the immutable archive for later retry | `registration_failure_keeps_archive_for_a_later_retry` |
 | Startup and Refresh Now reconcile archive-only assets into active data | `mfa-ingestion/tests/reconciliation.rs::startup_and_refresh_reconcile_archive_only_assets_into_active_snapshots` |
-| Startup crash reconciliation and recovery gate | `mfa-ingestion/tests/recovery.rs::startup_recovery_marks_interrupted_attempts_before_releasing_ingestion_gate`; `multi_source_recovery_marks_interrupted_once_before_releasing_gate`; gate recovery phase |
+| Startup crash reconciliation and recovery gate | `mfa-ingestion/tests/recovery.rs::startup_recovery_marks_interrupted_attempts_before_releasing_ingestion_gate`; `recover_sources_marks_interrupted_once_orders_reports_and_releases_gate`; `recover_sources_keeps_gate_blocked_when_second_reconciliation_fails`; gate recovery phase |
 | Failed replacement leaves active snapshot unchanged | `mfa-db/tests/fault_injection.rs::active_snapshot_failure_keeps_the_previous_snapshot_visible`; `injected_rebuild_swap_failure_reopens_the_original_database` |
 | Immutable archive rebuild | `mfa-ingestion/tests/rebuild.rs::rebuild_uses_a_temporary_actor_and_keeps_an_immutable_recovery_copy`; production importer test; gate rebuild phase |
 | Manual retry creates a fresh attempt | `manual_retry_replays_an_archived_asset_with_a_new_attempt_identity` |
@@ -42,7 +42,7 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 - Task 6 `cargo test -p myfitanalytics --test ingestion_commands` first failed with missing storage command/runtime symbols, then passed with 6 tests.
 - Task 6 `svelte-check` first failed because the new typed transport methods were absent, then passed after the transport/types/mock adapters were implemented.
 - The frontend boundary suite initially failed under browser resolution for Node filesystem imports; the per-file Node environment annotation fixed that scoped test, and the exact frontend gate now passes (3 files, 5 tests).
-- Independent-review correction tracers were observed red for the missing global multi-source recovery seam and poisoned post-attempt lock helper, then passed after `ee4ab2c`.
+- Independent-review correction tracers were observed red for the missing global multi-source recovery seam and poisoned post-attempt lock helper, then passed after `ee4ab2c`; direct `recover_sources` success/failure regressions passed after `d95f16d`.
 
 ## Architecture evidence
 
@@ -55,7 +55,7 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 
 ## Fresh final verification
 
-All commands below were run after implementation commit `ee4ab2c` and returned exit 0:
+All commands below were run after implementation/test commit `d95f16d` and returned exit 0:
 
 | Command | Result |
 | --- | --- |
@@ -67,4 +67,4 @@ All commands below were run after implementation commit `ee4ab2c` and returned e
 | `pnpm --dir web build` | Vite production build passed; 118 modules transformed |
 | `./scripts/storage-ingestion-gate.sh` | 1 storage-gate test and 6 Tauri command tests passed |
 | `git diff --check` | Passed |
-| `git status --short --branch` | Clean after the evidence follow-up commit; `feat/storage-ingestion...origin/main [ahead 11]` |
+| `git status --short --branch` | Clean after the evidence follow-up commit; `feat/storage-ingestion...origin/main [ahead 13]` |
