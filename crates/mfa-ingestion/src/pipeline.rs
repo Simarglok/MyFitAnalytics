@@ -1,10 +1,10 @@
 use crate::error::IngestionError;
 use crate::events::CoreEvent;
 use crate::queue::{BoxFuture, ScanExecutor, ScanQueue, ScanReport};
+use crate::rebuild::{ArchiveAssetImporter, RebuildError};
+use crate::recovery::{FailurePoint, FaultInjector, NoFaultInjector, RecoveryGate};
 
-use mfa_archive::{
-    ArchiveCoordinator, ArchiveDisposition, ScanRequest, StableCandidate, StableScanner,
-};
+use mfa_archive::{ArchiveCoordinator, ScanRequest, StableCandidate, StableScanner};
 use mfa_config::WorkspacePaths;
 use mfa_contracts::{
     AssetMetadata, AssetReadError, CanonicalObservation, ModuleId, ModuleManifest, ReadOnlyAsset,
@@ -12,8 +12,9 @@ use mfa_contracts::{
 };
 use mfa_db::{
     AssetRegistration, AttemptIdentity, CommitSnapshot, DataQualityItem, DatabaseService,
-    ExtensionContractRegistration, ExtensionRecord, FailAttempt, LineageLink, LogicalSnapshotKey,
-    RegisterAsset, RegisterReceipt, SourceRecord, ValidatedSnapshotBatch, validation,
+    ExtensionContractRegistration, ExtensionRecord, FailAttempt, HealthCheck, LineageLink,
+    LogicalSnapshotKey, RegisterAsset, RegisterReceipt, SourceRecord, ValidatedSnapshotBatch,
+    validation,
 };
 use mfa_module_host::{InstalledModule, RuntimeError, RuntimeLimits};
 use serde_json::json;
@@ -43,6 +44,62 @@ impl SourceInvoker for mfa_module_host::ComponentRuntime {
         Box::pin(mfa_module_host::ComponentRuntime::invoke_source(
             self, module, asset, limits,
         ))
+    }
+}
+
+pub struct RuntimeArchiveImporter {
+    source_module: InstalledModule,
+    runtime: Arc<dyn SourceInvoker>,
+    limits: RuntimeLimits,
+}
+
+impl RuntimeArchiveImporter {
+    pub fn new(
+        source_module: InstalledModule,
+        runtime: Arc<dyn SourceInvoker>,
+        limits: RuntimeLimits,
+    ) -> Self {
+        Self {
+            source_module,
+            runtime,
+            limits,
+        }
+    }
+}
+
+impl ArchiveAssetImporter for RuntimeArchiveImporter {
+    fn supports(&self, source_module_id: &ModuleId) -> bool {
+        &self.source_module.module_id == source_module_id
+    }
+
+    fn import<'a>(
+        &'a self,
+        database: DatabaseService,
+        asset: mfa_archive::ArchiveRecord,
+    ) -> BoxFuture<'a, Result<(), RebuildError>> {
+        let module = self.source_module.clone();
+        let runtime = Arc::clone(&self.runtime);
+        let limits = self.limits;
+        Box::pin(async move {
+            import_archived_asset(database, module, runtime, limits, asset)
+                .await
+                .map_err(|error| RebuildError::Importer {
+                    detail: error.to_string(),
+                })
+        })
+    }
+
+    fn validate<'a>(
+        &'a self,
+        database: DatabaseService,
+    ) -> BoxFuture<'a, Result<(), RebuildError>> {
+        Box::pin(async move {
+            database
+                .execute(HealthCheck)
+                .await
+                .map_err(RebuildError::Database)?;
+            Ok(())
+        })
     }
 }
 
@@ -84,6 +141,11 @@ struct PipelineState {
     completed_assets: u64,
     failed_before_archive_receipts: u64,
     fail_next_asset: bool,
+    fault_injector: Arc<dyn FaultInjector>,
+    recovery_gate: RecoveryGate,
+    failed_assets: u64,
+    event_failures: u64,
+    critical_failures: u64,
 }
 
 pub struct IngestionCoordinator {
@@ -113,6 +175,11 @@ impl IngestionCoordinator {
             completed_assets: 0,
             failed_before_archive_receipts: 0,
             fail_next_asset: false,
+            fault_injector: Arc::new(NoFaultInjector),
+            recovery_gate: RecoveryGate::ready(),
+            failed_assets: 0,
+            event_failures: 0,
+            critical_failures: 0,
         }));
         let executor = PipelineExecutor {
             state: Arc::clone(&state),
@@ -130,6 +197,11 @@ impl IngestionCoordinator {
         &self,
         request: ScanRequest,
     ) -> Result<crate::queue::ScanTicket, IngestionError> {
+        self.state
+            .lock()
+            .map_err(|_| poisoned())?
+            .recovery_gate
+            .ensure_ingestion_allowed()?;
         self.queue.request_scan(request).await
     }
 
@@ -159,6 +231,24 @@ impl IngestionCoordinator {
 
     pub fn set_runtime_failure_for_next_asset(&self) {
         self.state.lock().unwrap().fail_next_asset = true;
+    }
+
+    pub fn set_fault_injector(&self, injector: Arc<dyn FaultInjector>) {
+        self.state.lock().unwrap().fault_injector = injector;
+    }
+
+    pub fn set_recovery_gate(&self, gate: RecoveryGate) {
+        self.state.lock().unwrap().recovery_gate = gate;
+    }
+
+    pub fn health_snapshot(&self) -> crate::health::HealthSnapshot {
+        let guard = self.state.lock().unwrap();
+        crate::health::HealthSnapshot::from_counts(
+            0,
+            0,
+            guard.failed_assets + guard.event_failures,
+            guard.critical_failures,
+        )
     }
 }
 
@@ -196,7 +286,12 @@ async fn run_scan(
             Ok(AssetOutcome::Duplicate) => report.duplicate_assets += 1,
             Err(error) => {
                 report.failed_assets += 1;
-                let _ = error;
+                if let Ok(mut guard) = state.lock() {
+                    guard.failed_assets += 1;
+                    if matches!(error, IngestionError::CriticalFailure { .. }) {
+                        guard.critical_failures += 1;
+                    }
+                }
             }
         }
     }
@@ -219,15 +314,26 @@ async fn process_candidate(
         .and_then(|name| name.to_str())
         .unwrap_or("unnamed-asset")
         .to_owned();
-    let (dependencies, received_at, inject_failure) = {
+    let (dependencies, received_at, inject_failure, fault_injector) = {
         let mut guard = state.lock().map_err(|_| poisoned())?;
         let inject_failure = std::mem::take(&mut guard.fail_next_asset);
         (
             guard.dependencies.clone(),
             UtcInstant::from(chrono::Utc::now()),
             inject_failure,
+            Arc::clone(&guard.fault_injector),
         )
     };
+    if let Err(error) = fault_injector.check(FailurePoint::ArchiveCopy) {
+        return record_archive_failure(
+            &dependencies,
+            &source_path,
+            &inbox_filename,
+            received_at,
+            injected_error(error),
+        )
+        .await;
+    }
     let archived = match dependencies.archive.archive(candidate, received_at.clone()) {
         Ok(archived) => archived,
         Err(error) => {
@@ -254,13 +360,38 @@ async fn process_candidate(
             });
         }
     };
+    if let Err(error) = fault_injector.check(FailurePoint::ArchiveHashVerify) {
+        return record_archive_failure(
+            &dependencies,
+            &source_path,
+            &inbox_filename,
+            received_at,
+            injected_error(error),
+        )
+        .await;
+    }
+    if let Err(error) = fault_injector.check(FailurePoint::ArchiveRename) {
+        return record_archive_failure(
+            &dependencies,
+            &source_path,
+            &inbox_filename,
+            received_at,
+            injected_error(error),
+        )
+        .await;
+    }
     emit(&state, CoreEvent::Stage("archive_verified"));
-    fs::remove_file(&source_path).map_err(|error| IngestionError::TransientFailure {
-        code: "inbox_delete_failed".to_owned(),
-        detail: error.to_string(),
-    })?;
-    emit(&state, CoreEvent::Stage("inbox_removed"));
 
+    if let Err(error) = fault_injector.check(FailurePoint::AssetRegistration) {
+        return record_archive_failure(
+            &dependencies,
+            &source_path,
+            &inbox_filename,
+            received_at,
+            injected_error(error),
+        )
+        .await;
+    }
     let registered_asset = dependencies
         .database
         .execute(RegisterAsset {
@@ -277,8 +408,7 @@ async fn process_candidate(
         })
         .await
         .map_err(database_error)?;
-    let duplicate = archived.disposition == ArchiveDisposition::ExistingExactDuplicate
-        || !registered_asset.inserted;
+    let duplicate = !registered_asset.inserted;
     dependencies
         .database
         .execute(RegisterReceipt {
@@ -298,6 +428,8 @@ async fn process_candidate(
         .map_err(database_error)?;
     emit(&state, CoreEvent::Stage("receipt_registered"));
     if duplicate {
+        remove_inbox(&fault_injector, &source_path)?;
+        emit(&state, CoreEvent::Stage("inbox_removed"));
         let mut guard = state.lock().map_err(|_| poisoned())?;
         guard.duplicate_receipts += 1;
         return Ok(AssetOutcome::Duplicate);
@@ -350,6 +482,18 @@ async fn process_candidate(
         archived.original_filename.clone(),
     )?);
     increment_runtime_invocations(&state)?;
+    if let Err(error) = fault_injector.check(FailurePoint::GuestParse) {
+        let injected = injected_error(error);
+        let _ = fail_attempt(
+            &dependencies.database,
+            attempt.attempt_id,
+            injected.code(),
+            &injected.to_string(),
+        )
+        .await;
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(injected);
+    }
     let batch = dependencies
         .runtime
         .invoke_source(&dependencies.source_module, asset, dependencies.limits)
@@ -370,6 +514,18 @@ async fn process_candidate(
             return Err(IngestionError::AssetFailure { code, detail });
         }
     };
+    if let Err(error) = fault_injector.check(FailurePoint::HostValidation) {
+        let injected = injected_error(error);
+        let _ = fail_attempt(
+            &dependencies.database,
+            attempt.attempt_id,
+            injected.code(),
+            &injected.to_string(),
+        )
+        .await;
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(injected);
+    }
     let validated = build_validated_batch(&attempt, &archived, &dependencies.source_module, batch)?;
     validation::validate_batch(&validated).map_err(|error| IngestionError::AssetFailure {
         code: error.code().to_owned(),
@@ -390,13 +546,19 @@ async fn process_candidate(
     match result {
         Ok(result) => {
             emit(&state, CoreEvent::Stage("snapshot_committed"));
+            remove_inbox(&fault_injector, &source_path)?;
+            emit(&state, CoreEvent::Stage("inbox_removed"));
             let _ = state.lock().map(|mut guard| guard.completed_assets += 1);
-            let _ = state.lock().map(|guard| {
-                guard.events.send(CoreEvent::DataChanged {
-                    capabilities: result.changed_capabilities,
-                    dashboards: Vec::new(),
-                })
-            });
+            if fault_injector.check(FailurePoint::EventEmission).is_err() {
+                let _ = state.lock().map(|mut guard| guard.event_failures += 1);
+            } else {
+                let _ = state.lock().map(|guard| {
+                    guard.events.send(CoreEvent::DataChanged {
+                        capabilities: result.changed_capabilities,
+                        dashboards: Vec::new(),
+                    })
+                });
+            }
             Ok(AssetOutcome::Completed)
         }
         Err(error) => {
@@ -413,6 +575,119 @@ async fn process_candidate(
             })
         }
     }
+}
+
+async fn import_archived_asset(
+    database: DatabaseService,
+    source_module: InstalledModule,
+    runtime: Arc<dyn SourceInvoker>,
+    limits: RuntimeLimits,
+    asset: mfa_archive::ArchiveRecord,
+) -> Result<(), IngestionError> {
+    let archived = asset.into_archived_asset();
+    let (module_version, source_api_version, mapping_version) = source_metadata(&source_module)?;
+    let registered_asset = database
+        .execute(RegisterAsset {
+            asset: AssetRegistration {
+                asset_id: archived.asset_id,
+                source_module_id: archived.source_module_id.clone(),
+                asset_type: "source_export".to_owned(),
+                original_filename: archived.original_filename.clone(),
+                archive_path: archived.archive_path.to_string_lossy().into_owned(),
+                byte_sha256: archived.byte_sha256.clone(),
+                file_size: archived.file_size,
+                received_at: archived.received_at.clone(),
+            },
+        })
+        .await
+        .map_err(database_error)?;
+    if !registered_asset.inserted {
+        return Ok(());
+    }
+    let attempt = AttemptIdentity {
+        attempt_id: archived.asset_id,
+        asset_id: registered_asset.asset_id,
+        source_module_id: archived.source_module_id.clone(),
+        source_module_version: module_version,
+        source_module_package_sha256: source_module.package_hash.clone(),
+        source_api_version,
+        mapping_version,
+        schema_fingerprint: format!("module:{}", source_module.package_hash),
+        logical_snapshot_key: infer_logical_key(&source_module.module_id, &source_module, None)?,
+        started_at: archived.received_at.clone(),
+    };
+    database
+        .execute(attempt.start_command())
+        .await
+        .map_err(database_error)?;
+    let asset: Arc<dyn ReadOnlyAsset> = Arc::new(FileAsset::open(
+        registered_asset.asset_id,
+        archived.archive_path.clone(),
+        archived.original_filename.clone(),
+    )?);
+    let batch = runtime
+        .invoke_source(&source_module, asset, limits)
+        .await
+        .map_err(|error| IngestionError::AssetFailure {
+            code: error.code().to_owned(),
+            detail: error.detail().to_owned(),
+        })?;
+    let validated = build_validated_batch(&attempt, &archived, &source_module, batch)?;
+    validation::validate_batch(&validated).map_err(|error| IngestionError::AssetFailure {
+        code: error.code().to_owned(),
+        detail: error.to_string(),
+    })?;
+    for contract in extension_contracts(&validated, &source_module)? {
+        database.execute(contract).await.map_err(database_error)?;
+    }
+    database
+        .execute(CommitSnapshot(Arc::new(validated)))
+        .await
+        .map_err(database_error)?;
+    Ok(())
+}
+
+async fn record_archive_failure(
+    dependencies: &IngestionDependencies,
+    source_path: &std::path::Path,
+    inbox_filename: &str,
+    received_at: UtcInstant,
+    error: IngestionError,
+) -> Result<AssetOutcome, IngestionError> {
+    dependencies
+        .database
+        .execute(RegisterReceipt {
+            receipt_id: Uuid::new_v4(),
+            source_module_id: dependencies.source_module.module_id.clone(),
+            inbox_path: source_path.to_string_lossy().into_owned(),
+            original_filename: inbox_filename.to_owned(),
+            discovered_at: received_at,
+            asset_id: None,
+            outcome: "failed_before_archive".to_owned(),
+        })
+        .await
+        .map_err(database_error)?;
+    Err(error)
+}
+
+fn injected_error(error: crate::recovery::InjectedFailure) -> IngestionError {
+    IngestionError::TransientFailure {
+        code: format!("fault_injected_{:?}", error.point).to_lowercase(),
+        detail: error.to_string(),
+    }
+}
+
+fn remove_inbox(
+    fault_injector: &Arc<dyn FaultInjector>,
+    source_path: &std::path::Path,
+) -> Result<(), IngestionError> {
+    fault_injector
+        .check(FailurePoint::InboxDelete)
+        .map_err(injected_error)?;
+    fs::remove_file(source_path).map_err(|error| IngestionError::TransientFailure {
+        code: "inbox_delete_failed".to_owned(),
+        detail: error.to_string(),
+    })
 }
 
 fn source_metadata(module: &InstalledModule) -> Result<(String, String, String), IngestionError> {

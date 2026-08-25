@@ -86,12 +86,12 @@ async fn successful_asset_follows_archive_parse_commit_and_data_changed_order() 
         vec![
             "stable",
             "archive_verified",
-            "inbox_removed",
             "receipt_registered",
             "attempt_started",
             "guest_parsed",
             "host_validated",
             "snapshot_committed",
+            "inbox_removed",
         ]
     );
     assert!(!inbox.join("export.fixture").exists());
@@ -138,7 +138,7 @@ async fn one_asset_failure_does_not_stop_next_asset_after_archive_cleanup() {
     coordinator.set_runtime_failure_for_next_asset();
     coordinator.request_scan(request()).await.unwrap();
     coordinator.request_scan(request()).await.unwrap();
-    assert!(!inbox.join("bad.fixture").exists());
+    assert!(inbox.join("bad.fixture").exists());
     assert!(!inbox.join("good.fixture").exists());
     assert!(coordinator.completed_assets() >= 1);
     database.shutdown().await.unwrap();

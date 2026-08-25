@@ -114,6 +114,32 @@ pub struct ReconcileArchiveResult {
     pub missing_assets: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveAssetRecord {
+    pub asset_id: Uuid,
+    pub source_module_id: ModuleId,
+    pub asset_type: String,
+    pub original_filename: String,
+    pub archive_path: String,
+    pub byte_sha256: String,
+    pub file_size: u64,
+    pub received_at: UtcInstant,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconcileArchiveInventory {
+    pub source_module_id: ModuleId,
+    pub assets: Vec<ArchiveAssetRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconcileArchiveInventoryResult {
+    pub registered_assets: u64,
+    pub missing_assets: u64,
+    pub missing_asset_ids: Vec<Uuid>,
+    pub assets_to_ingest: Vec<ArchiveAssetRecord>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommitSnapshot(pub Arc<ValidatedSnapshotBatch>);
 
@@ -140,6 +166,10 @@ pub enum DatabaseCommand {
     ReconcileArchive(
         ReconcileArchive,
         oneshot::Sender<Result<ReconcileArchiveResult, DatabaseError>>,
+    ),
+    ReconcileArchiveInventory(
+        ReconcileArchiveInventory,
+        oneshot::Sender<Result<ReconcileArchiveInventoryResult, DatabaseError>>,
     ),
     QueryView(
         QueryView,
@@ -223,6 +253,15 @@ impl IntoDatabaseCommand<ReconcileArchiveResult> for ReconcileArchive {
         response: oneshot::Sender<Result<ReconcileArchiveResult, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::ReconcileArchive(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<ReconcileArchiveInventoryResult> for ReconcileArchiveInventory {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<ReconcileArchiveInventoryResult, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::ReconcileArchiveInventory(self, response)
     }
 }
 

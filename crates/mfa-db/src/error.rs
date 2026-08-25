@@ -18,6 +18,8 @@ pub enum DatabaseError {
     ActorStopped,
     #[error("database command failed: {detail}")]
     Command { detail: String },
+    #[error("database fault was injected at {point}")]
+    FaultInjected { point: String },
     #[error("database validation failed ({code}): {detail}")]
     Validation { code: &'static str, detail: String },
     #[error("extension contract is not registered: {contract_id}@{contract_version}")]
@@ -40,6 +42,7 @@ impl DatabaseError {
             Self::ChannelClosed => "database_channel_closed",
             Self::ActorStopped => "database_actor_stopped",
             Self::Command { .. } => "database_command_failed",
+            Self::FaultInjected { .. } => "database_fault_injected",
             Self::Validation { code, .. } => code,
             Self::ExtensionContractMissing { .. } => "extension_contract_missing",
             Self::Shutdown { .. } => "database_shutdown_failed",

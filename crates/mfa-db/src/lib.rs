@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod command;
 pub mod error;
+pub mod fault;
 pub mod migrations;
 pub mod provenance;
 pub mod validation;
@@ -13,12 +14,17 @@ use std::thread::JoinHandle;
 use tokio::sync::{mpsc, oneshot};
 
 pub use command::{
-    AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt, FailAttemptResult,
-    HealthCheck, HealthCheckResult, IntoDatabaseCommand, MarkInterrupted, MarkInterruptedResult,
-    QueryView, ReconcileArchive, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
+    ArchiveAssetRecord, AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt,
+    FailAttemptResult, HealthCheck, HealthCheckResult, IntoDatabaseCommand, MarkInterrupted,
+    MarkInterruptedResult, QueryView, ReconcileArchive, ReconcileArchiveInventory,
+    ReconcileArchiveInventoryResult, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
     RegisterReceipt, RegisterReceiptResult, Shutdown, StartAttempt, StartAttemptResult,
 };
 pub use error::DatabaseError;
+pub use fault::{
+    DatabaseFailurePoint, DatabaseFault, DatabaseFaultInjector, NoDatabaseFaultInjector,
+    TestDatabaseFaultInjector,
+};
 pub use migrations::CURRENT_SCHEMA_VERSION;
 pub use provenance::{
     AttemptIdentity, DataQualityItem, ExtensionContractRegistration,
@@ -46,6 +52,14 @@ impl std::fmt::Debug for DatabaseService {
 
 impl DatabaseService {
     pub async fn start(path: &Path, capacity: usize) -> Result<Self, DatabaseError> {
+        Self::start_with_fault_injector(path, capacity, Arc::new(NoDatabaseFaultInjector)).await
+    }
+
+    pub async fn start_with_fault_injector(
+        path: &Path,
+        capacity: usize,
+        fault_injector: Arc<dyn DatabaseFaultInjector>,
+    ) -> Result<Self, DatabaseError> {
         if capacity == 0 {
             return Err(DatabaseError::InvalidPath {
                 detail: "database command capacity must be positive".to_owned(),
@@ -61,7 +75,7 @@ impl DatabaseService {
         let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(1);
         let join_handle = std::thread::Builder::new()
             .name("mfa-db-actor".to_owned())
-            .spawn(move || run_actor(path, receiver, ready_sender))
+            .spawn(move || run_actor(path, receiver, ready_sender, fault_injector))
             .map_err(|error| DatabaseError::Open {
                 detail: error.to_string(),
             })?;

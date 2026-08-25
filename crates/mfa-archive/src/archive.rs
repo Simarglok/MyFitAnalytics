@@ -48,6 +48,14 @@ impl ArchiveCoordinator {
         &self.source_module_id
     }
 
+    pub fn reconciler(&self) -> crate::ArchiveReconciler {
+        crate::ArchiveReconciler::new(self.workspace.clone(), self.source_module_id.clone())
+    }
+
+    pub fn reconcile(&self) -> Result<crate::ArchiveInventory, crate::ReconciliationError> {
+        crate::ArchiveReconciler::new(self.workspace.clone(), self.source_module_id.clone()).scan()
+    }
+
     pub fn archive(
         &self,
         candidate: crate::StableCandidate,
@@ -257,7 +265,7 @@ fn install_without_overwrite(temporary: &Path, final_path: &Path) -> Result<(), 
     }
 }
 
-fn collect_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+pub(crate) fn collect_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
@@ -270,7 +278,7 @@ fn collect_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<(), std::io::
     Ok(())
 }
 
-fn hash_file(path: &Path) -> Result<String, std::io::Error> {
+pub(crate) fn hash_file(path: &Path) -> Result<String, std::io::Error> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
@@ -288,7 +296,7 @@ fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn asset_id_from_hash(hash: &str) -> Uuid {
+pub(crate) fn asset_id_from_hash(hash: &str) -> Uuid {
     let mut bytes = [0u8; 16];
     for (index, pair) in hash.as_bytes().chunks_exact(2).take(16).enumerate() {
         bytes[index] = (hex(pair[0]) << 4) | hex(pair[1]);

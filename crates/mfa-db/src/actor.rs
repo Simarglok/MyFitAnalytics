@@ -1,9 +1,10 @@
 use crate::command::{
     DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, MarkInterruptedResult,
-    RegisterAsset, RegisterAssetResult, RegisterReceipt, RegisterReceiptResult, StartAttempt,
-    StartAttemptResult, ViewResponse,
+    ReconcileArchiveInventory, ReconcileArchiveInventoryResult, RegisterAsset, RegisterAssetResult,
+    RegisterReceipt, RegisterReceiptResult, StartAttempt, StartAttemptResult, ViewResponse,
 };
 use crate::error::DatabaseError;
+use crate::fault::{DatabaseFailurePoint, DatabaseFaultInjector};
 use crate::migrations;
 use crate::provenance::{
     ExtensionContractRegistration, ExtensionContractRegistrationResult, RecordCounts,
@@ -24,6 +25,7 @@ pub(crate) fn run_actor(
     path: PathBuf,
     mut receiver: mpsc::Receiver<DatabaseCommand>,
     ready: std::sync::mpsc::SyncSender<Result<(), DatabaseError>>,
+    fault_injector: std::sync::Arc<dyn DatabaseFaultInjector>,
 ) {
     let connection = match Connection::open(&path) {
         Ok(connection) => connection,
@@ -43,13 +45,17 @@ pub(crate) fn run_actor(
     }
 
     while let Some(command) = receiver.blocking_recv() {
-        if process_command(&connection, command) {
+        if process_command(&connection, command, fault_injector.as_ref()) {
             break;
         }
     }
 }
 
-fn process_command(connection: &Connection, command: DatabaseCommand) -> bool {
+fn process_command(
+    connection: &Connection,
+    command: DatabaseCommand,
+    fault_injector: &dyn DatabaseFaultInjector,
+) -> bool {
     match command {
         DatabaseCommand::HealthCheck(response) => {
             let _ = response.send(health_check(connection));
@@ -74,11 +80,14 @@ fn process_command(connection: &Connection, command: DatabaseCommand) -> bool {
                 detail: "archive reconciliation is not initialized".to_owned(),
             }));
         }
+        DatabaseCommand::ReconcileArchiveInventory(command, response) => {
+            let _ = response.send(reconcile_archive_inventory(connection, command));
+        }
         DatabaseCommand::QueryView(command, response) => {
             let _ = response.send(query_view(connection, command));
         }
         DatabaseCommand::CommitSnapshot(command, response) => {
-            let _ = response.send(commit_snapshot(connection, command.0));
+            let _ = response.send(commit_snapshot(connection, command.0, fault_injector));
         }
         DatabaseCommand::RegisterExtensionContract(command, response) => {
             let _ = response.send(register_extension_contract(connection, command));
@@ -174,6 +183,116 @@ fn register_receipt(
     })
 }
 
+fn reconcile_archive_inventory(
+    connection: &Connection,
+    command: ReconcileArchiveInventory,
+) -> Result<ReconcileArchiveInventoryResult, DatabaseError> {
+    let source_module_id = command.source_module_id.to_string();
+    let mut registered_assets = 0;
+    let mut assets_to_ingest = Vec::new();
+    let mut archive_paths = BTreeSet::new();
+
+    for asset in command.assets {
+        if asset.source_module_id != command.source_module_id {
+            return Err(DatabaseError::Command {
+                detail: "archive inventory source module does not match command".to_owned(),
+            });
+        }
+        archive_paths.insert(asset.archive_path.clone());
+        let inserted = connection
+            .execute(
+                "INSERT INTO source_asset(
+                    asset_id, source_module_id, asset_type, original_filename, archive_path,
+                    byte_sha256, file_size, received_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (byte_sha256) DO NOTHING",
+                params![
+                    asset.asset_id.to_string(),
+                    asset.source_module_id.to_string(),
+                    asset.asset_type,
+                    asset.original_filename,
+                    asset.archive_path,
+                    asset.byte_sha256,
+                    asset.file_size,
+                    asset.received_at.as_datetime(),
+                ],
+            )
+            .map_err(DatabaseError::from_duckdb)?;
+        registered_assets += u64::from(inserted == 1);
+
+        let stored_asset_id: String = connection
+            .query_row(
+                "SELECT asset_id FROM source_asset WHERE byte_sha256 = ?",
+                params![asset.byte_sha256],
+                |row| row.get(0),
+            )
+            .map_err(DatabaseError::from_duckdb)?;
+        let stored_asset_id: Uuid =
+            stored_asset_id
+                .parse()
+                .map_err(|error| DatabaseError::Command {
+                    detail: format!("stored asset identity is invalid: {error}"),
+                })?;
+        let has_attempt = connection
+            .query_row(
+                "SELECT COUNT(*) FROM ingestion_attempt WHERE asset_id = ?",
+                params![stored_asset_id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(DatabaseError::from_duckdb)?;
+        if has_attempt == 0 {
+            let mut pending = asset;
+            pending.asset_id = stored_asset_id;
+            assets_to_ingest.push(pending);
+        }
+    }
+
+    let mut missing_asset_ids = Vec::new();
+    let mut statement = connection
+        .prepare(
+            "SELECT asset_id, archive_path FROM source_asset
+             WHERE source_module_id = ? ORDER BY asset_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![source_module_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    for row in rows {
+        let (asset_id, archive_path) = row.map_err(DatabaseError::from_duckdb)?;
+        if archive_paths.contains(&archive_path) {
+            continue;
+        }
+        let asset_uuid = asset_id.parse().map_err(|error| DatabaseError::Command {
+            detail: format!("stored asset identity is invalid: {error}"),
+        })?;
+        connection
+            .execute(
+                "INSERT INTO data_quality_item(
+                    data_quality_item_id, item_type, source_asset_id, source_record_id,
+                    severity, message, status, created_at, resolved_at
+                 ) VALUES (?, ?, ?, NULL, 'critical', ?, 'open', CURRENT_TIMESTAMP, NULL)
+                 ON CONFLICT (data_quality_item_id) DO NOTHING",
+                params![
+                    format!("archive_missing:{asset_id}"),
+                    "missing_archive_asset",
+                    asset_id,
+                    format!("immutable archive asset is missing: {archive_path}"),
+                ],
+            )
+            .map_err(DatabaseError::from_duckdb)?;
+        missing_asset_ids.push(asset_uuid);
+    }
+
+    Ok(ReconcileArchiveInventoryResult {
+        registered_assets,
+        missing_assets: missing_asset_ids.len() as u64,
+        missing_asset_ids,
+        assets_to_ingest,
+    })
+}
+
 fn start_attempt(
     connection: &Connection,
     command: StartAttempt,
@@ -266,9 +385,16 @@ fn register_extension_contract(
     })
 }
 
+fn database_fault(fault: crate::fault::DatabaseFault) -> DatabaseError {
+    DatabaseError::FaultInjected {
+        point: format!("{:?}", fault.point),
+    }
+}
+
 fn commit_snapshot(
     connection: &Connection,
     batch: std::sync::Arc<ValidatedSnapshotBatch>,
+    fault_injector: &dyn DatabaseFaultInjector,
 ) -> Result<SnapshotCommitResult, DatabaseError> {
     validation::validate_batch(&batch).map_err(DatabaseError::from)?;
     ensure_attempt_is_ready(connection, &batch)?;
@@ -278,6 +404,9 @@ fn commit_snapshot(
     let snapshot_id_string = snapshot_id.to_string();
     let counts = validation::record_counts(&batch);
     let changed_capabilities = changed_capabilities(&batch.observations)?;
+    fault_injector
+        .check(DatabaseFailurePoint::TransactionStart)
+        .map_err(database_fault)?;
     let transaction = connection
         .unchecked_transaction()
         .map_err(DatabaseError::from_duckdb)?;
@@ -385,6 +514,7 @@ fn commit_snapshot(
                 batch.logical_key.as_str(),
                 &batch,
                 observation,
+                fault_injector,
             )?;
         }
     }
@@ -396,9 +526,14 @@ fn commit_snapshot(
                 batch.logical_key.as_str(),
                 &batch,
                 observation,
+                fault_injector,
             )?;
         }
     }
+
+    fault_injector
+        .check(DatabaseFailurePoint::ActiveSwitch)
+        .map_err(database_fault)?;
 
     transaction
         .execute(
@@ -533,7 +668,11 @@ fn insert_canonical(
     logical_key: &str,
     batch: &ValidatedSnapshotBatch,
     observation: &CanonicalObservation,
+    fault_injector: &dyn DatabaseFaultInjector,
 ) -> Result<(), DatabaseError> {
+    fault_injector
+        .check(DatabaseFailurePoint::CanonicalInsert)
+        .map_err(database_fault)?;
     let source_record_id = source_record_id(batch, observation)?;
     match observation {
         CanonicalObservation::NutritionItem(value) => transaction.execute(
