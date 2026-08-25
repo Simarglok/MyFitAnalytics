@@ -1,0 +1,23 @@
+[package]
+name = "mfa-module-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+jsonschema.workspace = true
+mfa-config = { path = "../mfa-config" }
+mfa-contracts = { path = "../mfa-contracts" }
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+wasmtime.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

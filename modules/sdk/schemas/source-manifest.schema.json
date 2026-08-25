@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myfitanalytics.local/schemas/source-manifest.schema.json",
+  "title": "MyFitAnalytics source module manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "module_type",
+    "module_id",
+    "module_version",
+    "package_format_version",
+    "source_api_version",
+    "mapping_version",
+    "compatible_app_versions",
+    "provided_capabilities",
+    "accepted_file_patterns",
+    "entrypoint_hash",
+    "localization_namespace"
+  ],
+  "properties": {
+    "module_type": { "const": "source" },
+    "module_id": { "$ref": "#/$defs/id" },
+    "module_version": { "$ref": "#/$defs/version" },
+    "package_format_version": { "$ref": "#/$defs/version" },
+    "source_api_version": { "$ref": "#/$defs/version" },
+    "mapping_version": { "$ref": "#/$defs/version" },
+    "compatible_app_versions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "provided_capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "accepted_file_patterns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "entrypoint_hash": { "type": "string", "pattern": "^sha256:[A-Fa-f0-9]+$" },
+    "localization_namespace": { "$ref": "#/$defs/namespace" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "namespace": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+  }
+}

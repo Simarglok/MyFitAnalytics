@@ -1,0 +1,25 @@
+package myfitanalytics:source@1.0.0;
+
+interface host-asset {
+  record asset-metadata {
+    asset-id: string,
+    file-name: string,
+    media-type: string,
+    byte-len: u64,
+  }
+
+  resource asset-reader {
+    metadata: func() -> asset-metadata;
+    read-at: func(offset: u64, max-bytes: u32) -> result<list<u8>, string>;
+  }
+}
+
+world source-module {
+  import host-asset;
+  use host-asset.{asset-reader};
+
+  export metadata: func() -> string;
+  export detect: func(asset: borrow<asset-reader>) -> u8;
+  export validate: func(asset: borrow<asset-reader>) -> result<string, string>;
+  export parse: func(asset: borrow<asset-reader>) -> result<string, string>;
+}

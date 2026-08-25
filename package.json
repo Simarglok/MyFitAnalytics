@@ -1,0 +1,14 @@
+{
+  "name": "myfitanalytics",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.23.0",
+  "engines": {
+    "node": "24.19.0"
+  },
+  "scripts": {
+    "check": "pnpm --dir web check",
+    "test": "pnpm --dir web test -- --run",
+    "build": "pnpm --dir web build"
+  }
+}

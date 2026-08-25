@@ -1,0 +1,13 @@
+{
+  "module_type": "locale",
+  "module_id": "core-en",
+  "locale": "en",
+  "display_name": "English",
+  "module_version": "1.0.0",
+  "package_format_version": "1.0.0",
+  "compatible_app_versions": [">=0.1.0"],
+  "localization_namespace": "core",
+  "files": [
+    {"path": "messages.json", "sha256": "sha256:embedded", "executable": false}
+  ]
+}

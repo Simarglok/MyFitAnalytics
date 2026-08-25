@@ -1,0 +1,23 @@
+[package]
+name = "myfitanalytics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+mfa-config = { path = "../crates/mfa-config" }
+mfa-contracts = { path = "../crates/mfa-contracts" }
+mfa-module-host = { path = "../crates/mfa-module-host" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tauri = { version = "2.11.0", features = [] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
