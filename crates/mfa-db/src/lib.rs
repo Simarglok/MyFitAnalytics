@@ -2,6 +2,9 @@ pub mod actor;
 pub mod command;
 pub mod error;
 pub mod migrations;
+pub mod provenance;
+pub mod validation;
+pub mod views;
 
 use crate::actor::run_actor;
 use std::path::Path;
@@ -10,13 +13,20 @@ use std::thread::JoinHandle;
 use tokio::sync::{mpsc, oneshot};
 
 pub use command::{
-    AssetRegistration, DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheck,
-    HealthCheckResult, IntoDatabaseCommand, MarkInterrupted, MarkInterruptedResult, QueryView,
-    ReconcileArchive, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult, RegisterReceipt,
-    RegisterReceiptResult, Shutdown, StartAttempt, StartAttemptResult, ViewRequest, ViewResponse,
+    AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt, FailAttemptResult,
+    HealthCheck, HealthCheckResult, IntoDatabaseCommand, MarkInterrupted, MarkInterruptedResult,
+    QueryView, ReconcileArchive, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
+    RegisterReceipt, RegisterReceiptResult, Shutdown, StartAttempt, StartAttemptResult,
 };
 pub use error::DatabaseError;
 pub use migrations::CURRENT_SCHEMA_VERSION;
+pub use provenance::{
+    AttemptIdentity, DataQualityItem, ExtensionContractRegistration,
+    ExtensionContractRegistrationResult, ExtensionRecord, LineageLink, LogicalSnapshotKey,
+    RecordCounts, SnapshotCommitResult, SourceRecord, ValidatedSnapshotBatch,
+};
+pub use validation::ValidationError;
+pub use views::{ViewRequest, ViewResponse};
 
 #[derive(Clone)]
 pub struct DatabaseService {

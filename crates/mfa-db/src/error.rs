@@ -18,6 +18,13 @@ pub enum DatabaseError {
     ActorStopped,
     #[error("database command failed: {detail}")]
     Command { detail: String },
+    #[error("database validation failed ({code}): {detail}")]
+    Validation { code: &'static str, detail: String },
+    #[error("extension contract is not registered: {contract_id}@{contract_version}")]
+    ExtensionContractMissing {
+        contract_id: String,
+        contract_version: String,
+    },
     #[error("database shutdown failed: {detail}")]
     Shutdown { detail: String },
 }
@@ -33,12 +40,23 @@ impl DatabaseError {
             Self::ChannelClosed => "database_channel_closed",
             Self::ActorStopped => "database_actor_stopped",
             Self::Command { .. } => "database_command_failed",
+            Self::Validation { code, .. } => code,
+            Self::ExtensionContractMissing { .. } => "extension_contract_missing",
             Self::Shutdown { .. } => "database_shutdown_failed",
         }
     }
 
     pub(crate) fn from_duckdb(error: duckdb::Error) -> Self {
         Self::Command {
+            detail: error.to_string(),
+        }
+    }
+}
+
+impl From<crate::validation::ValidationError> for DatabaseError {
+    fn from(error: crate::validation::ValidationError) -> Self {
+        Self::Validation {
+            code: error.code(),
             detail: error.to_string(),
         }
     }

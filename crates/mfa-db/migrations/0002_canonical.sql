@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS nutrition_item (
-    nutrition_item_id VARCHAR PRIMARY KEY,
+    nutrition_item_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     occurred_local_at TIMESTAMP,
@@ -16,22 +16,24 @@ CREATE TABLE IF NOT EXISTS nutrition_item (
     sugars_g DOUBLE,
     sodium_mg DOUBLE,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, nutrition_item_id)
 );
 
 CREATE TABLE IF NOT EXISTS body_measurement (
-    body_measurement_id VARCHAR PRIMARY KEY,
+    body_measurement_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     local_date DATE NOT NULL,
     weight_kg DOUBLE NOT NULL CHECK (weight_kg > 0),
     body_fat_pct DOUBLE,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, body_measurement_id)
 );
 
 CREATE TABLE IF NOT EXISTS activity_event (
-    activity_event_id VARCHAR PRIMARY KEY,
+    activity_event_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     occurred_local_at TIMESTAMP NOT NULL,
@@ -44,11 +46,12 @@ CREATE TABLE IF NOT EXISTS activity_event (
     origin_hint VARCHAR,
     quality_status VARCHAR NOT NULL CHECK (quality_status IN ('accepted', 'unknown_mapping', 'parse_warning')),
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, activity_event_id)
 );
 
 CREATE TABLE IF NOT EXISTS activity_day (
-    activity_day_id VARCHAR PRIMARY KEY,
+    activity_day_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     local_date DATE NOT NULL,
@@ -59,21 +62,23 @@ CREATE TABLE IF NOT EXISTS activity_day (
     activity_distance_km DOUBLE NOT NULL,
     estimated_activity_calories_kcal DOUBLE NOT NULL,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, activity_day_id)
 );
 
 CREATE TABLE IF NOT EXISTS heart_rate_observation (
-    heart_rate_observation_id VARCHAR PRIMARY KEY,
+    heart_rate_observation_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     observed_local_at TIMESTAMP NOT NULL,
     heart_rate_bpm DOUBLE NOT NULL CHECK (heart_rate_bpm > 0),
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, heart_rate_observation_id)
 );
 
 CREATE TABLE IF NOT EXISTS workout_session (
-    workout_session_id VARCHAR PRIMARY KEY,
+    workout_session_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     title VARCHAR NOT NULL,
@@ -82,11 +87,12 @@ CREATE TABLE IF NOT EXISTS workout_session (
     duration_seconds UINTEGER,
     source_record_group_key VARCHAR NOT NULL,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, workout_session_id)
 );
 
 CREATE TABLE IF NOT EXISTS exercise_set (
-    exercise_set_id VARCHAR PRIMARY KEY,
+    exercise_set_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     workout_session_id VARCHAR NOT NULL,
@@ -101,12 +107,14 @@ CREATE TABLE IF NOT EXISTS exercise_set (
     duration_seconds UINTEGER,
     rpe DOUBLE,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (workout_session_id) REFERENCES workout_session(workout_session_id),
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (snapshot_id, workout_session_id)
+        REFERENCES workout_session(snapshot_id, workout_session_id),
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, exercise_set_id)
 );
 
 CREATE TABLE IF NOT EXISTS phase_event (
-    phase_event_id VARCHAR PRIMARY KEY,
+    phase_event_id VARCHAR NOT NULL,
     snapshot_id VARCHAR NOT NULL,
     logical_snapshot_key VARCHAR NOT NULL,
     event_type VARCHAR NOT NULL,
@@ -115,7 +123,8 @@ CREATE TABLE IF NOT EXISTS phase_event (
     description VARCHAR,
     exclude_from_tdee BOOLEAN NOT NULL,
     source_record_id VARCHAR NOT NULL,
-    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
+    FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id),
+    PRIMARY KEY (snapshot_id, phase_event_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_nutrition_snapshot ON nutrition_item(logical_snapshot_key, snapshot_id);

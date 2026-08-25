@@ -53,11 +53,12 @@ CREATE TABLE IF NOT EXISTS source_record (
 );
 
 CREATE TABLE IF NOT EXISTS lineage (
+    snapshot_id VARCHAR NOT NULL,
     canonical_entity_type VARCHAR NOT NULL,
     canonical_entity_id VARCHAR NOT NULL,
     source_record_id VARCHAR NOT NULL,
     mapping_version VARCHAR NOT NULL,
-    PRIMARY KEY (canonical_entity_type, canonical_entity_id, source_record_id),
+    PRIMARY KEY (snapshot_id, canonical_entity_type, canonical_entity_id, source_record_id),
     FOREIGN KEY (source_record_id) REFERENCES source_record(source_record_id)
 );
 

@@ -1,6 +1,12 @@
 use crate::error::DatabaseError;
+use crate::provenance::{
+    ExtensionContractRegistration, ExtensionContractRegistrationResult, SnapshotCommitResult,
+    ValidatedSnapshotBatch,
+};
+pub use crate::views::{QueryView, ViewResponse};
 use mfa_contracts::{ModuleId, UtcInstant};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -109,17 +115,7 @@ pub struct ReconcileArchiveResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct QueryView {
-    pub request: ViewRequest,
-}
-
-#[derive(Debug, Clone)]
-pub struct ViewRequest;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ViewResponse {
-    pub rows: Vec<serde_json::Value>,
-}
+pub struct CommitSnapshot(pub Arc<ValidatedSnapshotBatch>);
 
 #[derive(Debug)]
 pub enum DatabaseCommand {
@@ -148,6 +144,14 @@ pub enum DatabaseCommand {
     QueryView(
         QueryView,
         oneshot::Sender<Result<ViewResponse, DatabaseError>>,
+    ),
+    CommitSnapshot(
+        CommitSnapshot,
+        oneshot::Sender<Result<SnapshotCommitResult, DatabaseError>>,
+    ),
+    RegisterExtensionContract(
+        ExtensionContractRegistration,
+        oneshot::Sender<Result<ExtensionContractRegistrationResult, DatabaseError>>,
     ),
     Shutdown(oneshot::Sender<Result<(), DatabaseError>>),
 }
@@ -228,6 +232,24 @@ impl IntoDatabaseCommand<ViewResponse> for QueryView {
         response: oneshot::Sender<Result<ViewResponse, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::QueryView(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<SnapshotCommitResult> for CommitSnapshot {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<SnapshotCommitResult, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::CommitSnapshot(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<ExtensionContractRegistrationResult> for ExtensionContractRegistration {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<ExtensionContractRegistrationResult, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::RegisterExtensionContract(self, response)
     }
 }
 
