@@ -1,0 +1,17 @@
+[package]
+name = "mfa-guest-source"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+undeclared = []
+
+[dependencies]
+wit-bindgen = "=0.46.0"
+
+[workspace]
