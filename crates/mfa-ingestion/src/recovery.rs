@@ -16,6 +16,7 @@ pub enum FailurePoint {
     InboxDelete,
     AssetRegistration,
     GuestParse,
+    BuildBatch,
     HostValidation,
     TransactionStart,
     CanonicalInsert,

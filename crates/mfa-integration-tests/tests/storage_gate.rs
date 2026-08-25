@@ -146,9 +146,15 @@ async fn storage_gate_serializes_all_archive_ingestion_recovery_and_rebuild_path
     let inbox = workspace.source_inbox(&source);
     std::fs::write(inbox.join("transaction.fixture"), b"transaction bytes").unwrap();
     scan_twice(&coordinator).await;
-    assert!(inbox.join("transaction.fixture").exists());
-    scan_twice(&coordinator).await;
     assert!(!inbox.join("transaction.fixture").exists());
+    let transaction_asset_id = ArchiveReconciler::new(workspace.clone(), source.clone())
+        .scan()
+        .unwrap()
+        .assets
+        .first()
+        .unwrap()
+        .asset_id;
+    coordinator.retry_asset(transaction_asset_id).await.unwrap();
 
     let invocations_after_success = runtime.invocations.load(Ordering::SeqCst);
     std::fs::write(inbox.join("duplicate.fixture"), b"transaction bytes").unwrap();
@@ -162,7 +168,7 @@ async fn storage_gate_serializes_all_archive_ingestion_recovery_and_rebuild_path
     runtime.fail_next.store(true, Ordering::SeqCst);
     std::fs::write(inbox.join("parse.fixture"), b"parse bytes").unwrap();
     scan_twice(&coordinator).await;
-    assert!(inbox.join("parse.fixture").exists());
+    assert!(!inbox.join("parse.fixture").exists());
 
     let recovery_gate = RecoveryGate::new();
     let recovery = RecoveryService::new(

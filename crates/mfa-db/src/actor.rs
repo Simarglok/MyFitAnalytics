@@ -1,8 +1,8 @@
 use crate::command::{
     DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, ListQualityItemsResult,
-    MarkInterruptedResult, ReconcileArchiveInventory, ReconcileArchiveInventoryResult,
-    RegisterAsset, RegisterAssetResult, RegisterReceipt, RegisterReceiptResult, StartAttempt,
-    StartAttemptResult, ViewResponse,
+    MarkInterruptedResult, QueryAttempt, QueryAttemptResult, ReconcileArchiveInventory,
+    ReconcileArchiveInventoryResult, RegisterAsset, RegisterAssetResult, RegisterReceipt,
+    RegisterReceiptResult, StartAttempt, StartAttemptResult, ViewResponse,
 };
 use crate::error::DatabaseError;
 use crate::fault::{DatabaseFailurePoint, DatabaseFaultInjector};
@@ -71,6 +71,9 @@ fn process_command(
         DatabaseCommand::StartAttempt(command, response) => {
             let _ = response.send(start_attempt(connection, command));
         }
+        DatabaseCommand::QueryAttempt(command, response) => {
+            let _ = response.send(query_attempt(connection, command));
+        }
         DatabaseCommand::FailAttempt(command, response) => {
             let _ = response.send(fail_attempt(connection, command));
         }
@@ -95,7 +98,11 @@ fn process_command(
             let _ = response.send(commit_snapshot(connection, command.0, fault_injector));
         }
         DatabaseCommand::RegisterExtensionContract(command, response) => {
-            let _ = response.send(register_extension_contract(connection, command));
+            let _ = response.send(register_extension_contract(
+                connection,
+                command,
+                fault_injector,
+            ));
         }
         DatabaseCommand::Shutdown(response) => {
             let _ = response.send(Ok(()));
@@ -340,6 +347,53 @@ fn start_attempt(
     })
 }
 
+fn query_attempt(
+    connection: &Connection,
+    command: QueryAttempt,
+) -> Result<QueryAttemptResult, DatabaseError> {
+    let attempt_id = command.attempt_id.to_string();
+    let (status, finished_at, error_code, error_message, record_count): (
+        String,
+        Option<chrono::NaiveDateTime>,
+        Option<String>,
+        Option<String>,
+        i64,
+    ) = connection
+        .query_row(
+            "SELECT status, finished_at, error_code, error_message, record_count
+             FROM ingestion_attempt WHERE attempt_id = ?",
+            params![&attempt_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|error| match error {
+            duckdb::Error::QueryReturnedNoRows => DatabaseError::Command {
+                detail: format!("ingestion attempt not found: {attempt_id}"),
+            },
+            other => DatabaseError::from_duckdb(other),
+        })?;
+    let attempt_id = command.attempt_id;
+    Ok(QueryAttemptResult {
+        attempt_id,
+        status,
+        finished_at: finished_at.map(|value| {
+            mfa_contracts::UtcInstant::from(chrono::DateTime::<Utc>::from_naive_utc_and_offset(
+                value, Utc,
+            ))
+        }),
+        error_code,
+        error_message,
+        record_count: record_count as u64,
+    })
+}
+
 fn fail_attempt(
     connection: &Connection,
     command: FailAttempt,
@@ -381,7 +435,11 @@ fn mark_interrupted(connection: &Connection) -> Result<MarkInterruptedResult, Da
 fn register_extension_contract(
     connection: &Connection,
     command: ExtensionContractRegistration,
+    fault_injector: &dyn DatabaseFaultInjector,
 ) -> Result<ExtensionContractRegistrationResult, DatabaseError> {
+    fault_injector
+        .check(DatabaseFailurePoint::ExtensionContractRegistration)
+        .map_err(database_fault)?;
     connection
         .execute(
             "INSERT INTO extension_contract(

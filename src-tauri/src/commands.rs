@@ -161,24 +161,37 @@ pub async fn set_workspace_root_inner(
 }
 
 pub async fn refresh_now_inner(state: &AppState) -> Result<ScanTicketView, CommandError> {
-    let coordinator = storage_coordinator(state)?;
-    let ticket = coordinator
-        .request_scan(now_request(mfa_ingestion::ScanReason::Manual))
-        .await
-        .map_err(|error| CommandError {
-            code: "refresh_failed".to_owned(),
-            message: error.to_string(),
-        })?;
+    let coordinators = storage_coordinators(state)?;
+    let mut first_ticket = None;
+    let mut coalesced_requests: u32 = 0;
+    for coordinator in coordinators {
+        let ticket = coordinator
+            .request_scan(now_request(mfa_ingestion::ScanReason::Manual))
+            .await
+            .map_err(|error| CommandError {
+                code: "refresh_failed".to_owned(),
+                message: error.to_string(),
+            })?;
+        if first_ticket.is_none() {
+            first_ticket = Some(ticket);
+        } else {
+            coalesced_requests = coalesced_requests.saturating_add(ticket.coalesced_requests);
+        }
+    }
+    let ticket = first_ticket.ok_or_else(|| CommandError {
+        code: "source_module_unavailable".to_owned(),
+        message: "no enabled source module is configured".to_owned(),
+    })?;
     Ok(ScanTicketView {
         scan_id: ticket.scan_id.to_string(),
-        coalesced_requests: ticket.coalesced_requests,
+        coalesced_requests: ticket.coalesced_requests.saturating_add(coalesced_requests),
     })
 }
 
 pub async fn get_ingestion_status_inner(
     state: &AppState,
 ) -> Result<IngestionStatusView, CommandError> {
-    let (database, coordinator, gate, queue_capacity) = {
+    let (database, coordinators, gate, queue_capacity) = {
         let storage = state.storage_lock().map_err(CommandError::from)?;
         let Some(storage) = storage.as_ref() else {
             return Ok(IngestionStatusView {
@@ -190,7 +203,7 @@ pub async fn get_ingestion_status_inner(
         };
         (
             storage.database.clone(),
-            storage.coordinator.clone(),
+            storage.coordinators.clone(),
             storage.recovery_gate.clone(),
             storage.database.queue_capacity(),
         )
@@ -202,9 +215,16 @@ pub async fn get_ingestion_status_inner(
             code: "database_unavailable".to_owned(),
             message: error.to_string(),
         })?;
-    let health = coordinator
-        .map(|coordinator| coordinator.health_snapshot())
-        .unwrap_or_else(|| HealthSnapshot::from_counts(0, 0, 0, 0));
+    let mut health = HealthSnapshot::from_counts(0, 0, 0, 0);
+    for coordinator in coordinators {
+        let snapshot = coordinator.health_snapshot();
+        health = HealthSnapshot::from_counts(
+            health.working_jobs + snapshot.working_jobs,
+            health.waiting_assets + snapshot.waiting_assets,
+            health.attention_items + snapshot.attention_items,
+            health.critical_items + snapshot.critical_items,
+        );
+    }
     Ok(IngestionStatusView {
         health: health_view(health),
         queue_capacity,
@@ -256,14 +276,30 @@ pub async fn retry_asset_inner(
         code: "invalid_asset_id".to_owned(),
         message: error.to_string(),
     })?;
-    let coordinator = storage_coordinator(state)?;
-    let retry = coordinator
-        .retry_asset(asset_id)
-        .await
-        .map_err(|error| CommandError {
-            code: "retry_failed".to_owned(),
-            message: error.to_string(),
-        })?;
+    let coordinators = storage_coordinators(state)?;
+    let mut last_error = None;
+    let mut retry = None;
+    for coordinator in coordinators {
+        match coordinator.retry_asset(asset_id).await {
+            Ok(result) => {
+                retry = Some(result);
+                break;
+            }
+            Err(error) if is_archive_asset_not_found(&error) => last_error = Some(error),
+            Err(error) => {
+                return Err(CommandError {
+                    code: "retry_failed".to_owned(),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+    let retry = retry.ok_or_else(|| CommandError {
+        code: "retry_failed".to_owned(),
+        message: last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no enabled source module is configured".to_owned()),
+    })?;
     Ok(AttemptView {
         asset_id: retry.asset_id.to_string(),
         attempt_id: Some(retry.attempt_id.to_string()),
@@ -272,15 +308,28 @@ pub async fn retry_asset_inner(
     })
 }
 
-fn storage_coordinator(state: &AppState) -> Result<IngestionCoordinator, CommandError> {
+fn storage_coordinators(state: &AppState) -> Result<Vec<IngestionCoordinator>, CommandError> {
     let storage = state.storage_lock().map_err(CommandError::from)?;
-    storage
+    let coordinators = storage
         .as_ref()
-        .and_then(|storage| storage.coordinator.clone())
-        .ok_or_else(|| CommandError {
+        .map(|storage| storage.coordinators.clone())
+        .unwrap_or_default();
+    if coordinators.is_empty() {
+        Err(CommandError {
             code: "source_module_unavailable".to_owned(),
             message: "no enabled source module is configured".to_owned(),
         })
+    } else {
+        Ok(coordinators)
+    }
+}
+
+fn is_archive_asset_not_found(error: &mfa_ingestion::IngestionError) -> bool {
+    matches!(
+        error,
+        mfa_ingestion::IngestionError::AssetFailure { code, .. }
+            if code == "archive_asset_not_found"
+    )
 }
 
 fn workspace_view(state: &AppState) -> Result<WorkspaceView, CommandError> {

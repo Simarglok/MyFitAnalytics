@@ -7,6 +7,7 @@ pub enum DatabaseFailurePoint {
     TransactionStart,
     CanonicalInsert,
     ActiveSwitch,
+    ExtensionContractRegistration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

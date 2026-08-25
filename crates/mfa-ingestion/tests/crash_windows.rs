@@ -49,7 +49,7 @@ async fn coordinator(temp: &TempDir) -> (IngestionCoordinator, DatabaseService, 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn registration_failure_keeps_archive_and_inbox_for_a_later_retry() {
+async fn registration_failure_keeps_archive_for_a_later_retry() {
     let temp = TempDir::new().unwrap();
     let (coordinator, database, source) = coordinator(&temp).await;
     let workspace = WorkspacePaths::new(temp.path().join("workspace"));
@@ -63,7 +63,7 @@ async fn registration_failure_keeps_archive_and_inbox_for_a_later_retry() {
     coordinator.request_scan(request()).await.unwrap();
     let failed = coordinator.request_scan(request()).await.unwrap();
     assert_eq!(failed.coalesced_requests, 0);
-    assert!(source_path.exists());
+    assert!(!source_path.exists());
     let inventory = ArchiveReconciler::new(workspace.clone(), source.clone())
         .scan()
         .unwrap();
@@ -116,7 +116,7 @@ async fn manual_retry_replays_an_archived_asset_with_a_new_attempt_identity() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn canonical_transaction_failure_retries_a_registered_asset_before_inbox_delete() {
+async fn canonical_transaction_failure_retries_a_registered_asset_after_archive_verification() {
     let temp = TempDir::new().unwrap();
     let source = ModuleId::try_from("fixture-source").unwrap();
     let workspace = WorkspacePaths::new(temp.path().join("workspace"));
@@ -149,10 +149,9 @@ async fn canonical_transaction_failure_retries_a_registered_asset_before_inbox_d
     std::fs::write(&source_path, b"transaction retry").unwrap();
     coordinator.request_scan(request()).await.unwrap();
     coordinator.request_scan(request()).await.unwrap();
-    assert!(source_path.exists());
-    coordinator.request_scan(request()).await.unwrap();
-    coordinator.request_scan(request()).await.unwrap();
     assert!(!source_path.exists());
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
     let active = database
         .execute(QueryView::active_snapshot(
             LogicalSnapshotKey::new("fixture-source:default").unwrap(),

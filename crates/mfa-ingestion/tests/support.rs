@@ -45,6 +45,13 @@ pub fn fake_runtime(batch: SourceBatch) -> Arc<FakeRuntime> {
     })
 }
 
+impl FakeRuntime {
+    #[allow(dead_code)]
+    pub fn fail_next(&self) {
+        *self.fail_next.lock().unwrap() = true;
+    }
+}
+
 pub fn nutrition_batch() -> SourceBatch {
     SourceBatch {
         records: vec![CanonicalObservation::NutritionItem(NutritionItem {

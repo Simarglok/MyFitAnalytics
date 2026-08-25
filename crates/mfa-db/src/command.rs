@@ -81,6 +81,21 @@ pub struct StartAttemptResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct QueryAttempt {
+    pub attempt_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryAttemptResult {
+    pub attempt_id: Uuid,
+    pub status: String,
+    pub finished_at: Option<UtcInstant>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub record_count: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct FailAttempt {
     pub attempt_id: Uuid,
     pub finished_at: UtcInstant,
@@ -167,6 +182,10 @@ pub enum DatabaseCommand {
         StartAttempt,
         oneshot::Sender<Result<StartAttemptResult, DatabaseError>>,
     ),
+    QueryAttempt(
+        QueryAttempt,
+        oneshot::Sender<Result<QueryAttemptResult, DatabaseError>>,
+    ),
     FailAttempt(
         FailAttempt,
         oneshot::Sender<Result<FailAttemptResult, DatabaseError>>,
@@ -236,6 +255,15 @@ impl IntoDatabaseCommand<StartAttemptResult> for StartAttempt {
         response: oneshot::Sender<Result<StartAttemptResult, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::StartAttempt(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<QueryAttemptResult> for QueryAttempt {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<QueryAttemptResult, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::QueryAttempt(self, response)
     }
 }
 

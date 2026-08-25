@@ -13,10 +13,10 @@ use mfa_contracts::{
     SourceBatch, UtcInstant,
 };
 use mfa_db::{
-    AssetRegistration, AttemptIdentity, CommitSnapshot, DataQualityItem, DatabaseService,
-    ExtensionContractRegistration, ExtensionRecord, FailAttempt, HealthCheck, LineageLink,
-    LogicalSnapshotKey, RegisterAsset, RegisterReceipt, SourceRecord, ValidatedSnapshotBatch,
-    validation,
+    ArchiveAssetRecord, AssetRegistration, AttemptIdentity, CommitSnapshot, DataQualityItem,
+    DatabaseService, ExtensionContractRegistration, ExtensionRecord, FailAttempt, HealthCheck,
+    LineageLink, LogicalSnapshotKey, ReconcileArchiveInventory, RegisterAsset, RegisterReceipt,
+    SourceRecord, ValidatedSnapshotBatch, validation,
 };
 use mfa_module_host::{InstalledModule, RuntimeError, RuntimeLimits};
 use serde_json::json;
@@ -53,6 +53,7 @@ pub struct RuntimeArchiveImporter {
     source_module: InstalledModule,
     runtime: Arc<dyn SourceInvoker>,
     limits: RuntimeLimits,
+    last_attempt_id: Arc<Mutex<Option<Uuid>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +72,12 @@ impl RuntimeArchiveImporter {
             source_module,
             runtime,
             limits,
+            last_attempt_id: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn last_attempt_id(&self) -> Option<Uuid> {
+        self.last_attempt_id.lock().ok().and_then(|guard| *guard)
     }
 }
 
@@ -88,12 +94,21 @@ impl ArchiveAssetImporter for RuntimeArchiveImporter {
         let module = self.source_module.clone();
         let runtime = Arc::clone(&self.runtime);
         let limits = self.limits;
+        let last_attempt_id = Arc::clone(&self.last_attempt_id);
         Box::pin(async move {
-            import_archived_asset(database, module, runtime, limits, asset, false)
-                .await
-                .map_err(|error| RebuildError::Importer {
-                    detail: error.to_string(),
-                })?;
+            import_archived_asset(
+                database,
+                module,
+                runtime,
+                limits,
+                asset,
+                false,
+                Some(last_attempt_id),
+            )
+            .await
+            .map_err(|error| RebuildError::Importer {
+                detail: error.to_string(),
+            })?;
             Ok(())
         })
     }
@@ -148,6 +163,7 @@ struct PipelineState {
     runtime_invocations: u64,
     duplicate_receipts: u64,
     completed_assets: u64,
+    last_attempt_id: Option<Uuid>,
     failed_before_archive_receipts: u64,
     fail_next_asset: bool,
     fault_injector: Arc<dyn FaultInjector>,
@@ -183,6 +199,7 @@ impl IngestionCoordinator {
             runtime_invocations: 0,
             duplicate_receipts: 0,
             completed_assets: 0,
+            last_attempt_id: None,
             failed_before_archive_receipts: 0,
             fail_next_asset: false,
             fault_injector: Arc::new(NoFaultInjector),
@@ -235,6 +252,10 @@ impl IngestionCoordinator {
         self.state.lock().unwrap().completed_assets
     }
 
+    pub fn last_attempt_id(&self) -> Option<Uuid> {
+        self.state.lock().unwrap().last_attempt_id
+    }
+
     pub fn failed_before_archive_receipts(&self) -> u64 {
         self.state.lock().unwrap().failed_before_archive_receipts
     }
@@ -262,8 +283,9 @@ impl IngestionCoordinator {
     }
 
     pub async fn retry_asset(&self, asset_id: Uuid) -> Result<RetryResult, IngestionError> {
+        let state = Arc::clone(&self.state);
         let (dependencies, gate) = {
-            let guard = self.state.lock().map_err(|_| poisoned())?;
+            let guard = state.lock().map_err(|_| poisoned())?;
             (guard.dependencies.clone(), guard.recovery_gate.clone())
         };
         gate.ensure_ingestion_allowed()?;
@@ -284,16 +306,24 @@ impl IngestionCoordinator {
                 code: "archive_asset_not_found".to_owned(),
                 detail: asset_id.to_string(),
             })?;
-        let attempt_id = import_archived_asset(
+        let attempt_tracker = Arc::new(Mutex::new(None));
+        let import_result = import_archived_asset(
             dependencies.database,
             dependencies.source_module,
             dependencies.runtime,
             dependencies.limits,
             archived,
             true,
+            Some(Arc::clone(&attempt_tracker)),
         )
-        .await?
-        .ok_or_else(|| IngestionError::AssetFailure {
+        .await;
+        if let Ok(last_attempt_id) = attempt_tracker.lock()
+            && let Some(last_attempt_id) = *last_attempt_id
+            && let Ok(mut guard) = state.lock()
+        {
+            guard.last_attempt_id = Some(last_attempt_id);
+        }
+        let attempt_id = import_result?.ok_or_else(|| IngestionError::AssetFailure {
             code: "retry_not_started".to_owned(),
             detail: asset_id.to_string(),
         })?;
@@ -315,6 +345,51 @@ async fn run_scan(
     state: Arc<Mutex<PipelineState>>,
     _request: ScanRequest,
 ) -> Result<ScanReport, IngestionError> {
+    let mut report = ScanReport::default();
+    let archived_assets = match reconcile_archive_assets(&state).await {
+        Ok(assets) => assets,
+        Err(error) => {
+            report.failed_assets += 1;
+            if let Ok(mut guard) = state.lock() {
+                guard.failed_assets += 1;
+                guard.critical_failures += 1;
+            }
+            let _ = error;
+            Vec::new()
+        }
+    };
+    for archived in archived_assets {
+        let (dependencies, runtime) = {
+            let guard = state.lock().map_err(|_| poisoned())?;
+            (
+                guard.dependencies.clone(),
+                Arc::clone(&guard.dependencies.runtime),
+            )
+        };
+        match import_archived_asset(
+            dependencies.database,
+            dependencies.source_module,
+            runtime,
+            dependencies.limits,
+            archived,
+            false,
+            None,
+        )
+        .await
+        {
+            Ok(Some(_)) => report.completed_assets += 1,
+            Ok(None) => report.duplicate_assets += 1,
+            Err(error) => {
+                report.failed_assets += 1;
+                if let Ok(mut guard) = state.lock() {
+                    guard.failed_assets += 1;
+                    if matches!(error, IngestionError::CriticalFailure { .. }) {
+                        guard.critical_failures += 1;
+                    }
+                }
+            }
+        }
+    }
     let candidates = {
         let mut state_guard = state.lock().map_err(|_| IngestionError::CriticalFailure {
             code: "pipeline_state_poisoned".to_owned(),
@@ -331,7 +406,6 @@ async fn run_scan(
                 detail: error.to_string(),
             })?
     };
-    let mut report = ScanReport::default();
     for candidate in candidates {
         match process_candidate(Arc::clone(&state), candidate).await {
             Ok(AssetOutcome::Completed) => report.completed_assets += 1,
@@ -348,6 +422,59 @@ async fn run_scan(
         }
     }
     Ok(report)
+}
+
+async fn reconcile_archive_assets(
+    state: &Arc<Mutex<PipelineState>>,
+) -> Result<Vec<mfa_archive::ArchiveRecord>, IngestionError> {
+    let (workspace, source_module_id, database) = {
+        let guard = state.lock().map_err(|_| poisoned())?;
+        (
+            guard.dependencies.workspace.clone(),
+            guard.dependencies.source_module.module_id.clone(),
+            guard.dependencies.database.clone(),
+        )
+    };
+    let inventory = ArchiveReconciler::new(workspace, source_module_id.clone())
+        .scan()
+        .map_err(|error| IngestionError::CriticalFailure {
+            code: error.code().to_owned(),
+            detail: error.to_string(),
+        })?;
+    let assets = inventory.assets.iter().map(archive_asset_record).collect();
+    let result = database
+        .execute(ReconcileArchiveInventory {
+            source_module_id,
+            assets,
+        })
+        .await
+        .map_err(database_error)?;
+    Ok(result
+        .assets_to_ingest
+        .into_iter()
+        .map(|asset| mfa_archive::ArchiveRecord {
+            asset_id: asset.asset_id,
+            source_module_id: asset.source_module_id,
+            original_filename: asset.original_filename,
+            archive_path: PathBuf::from(asset.archive_path),
+            byte_sha256: asset.byte_sha256,
+            file_size: asset.file_size,
+            received_at: asset.received_at,
+        })
+        .collect())
+}
+
+fn archive_asset_record(asset: &mfa_archive::ArchiveRecord) -> ArchiveAssetRecord {
+    ArchiveAssetRecord {
+        asset_id: asset.asset_id,
+        source_module_id: asset.source_module_id.clone(),
+        asset_type: "source_export".to_owned(),
+        original_filename: asset.original_filename.clone(),
+        archive_path: asset.archive_path.to_string_lossy().into_owned(),
+        byte_sha256: asset.byte_sha256.clone(),
+        file_size: asset.file_size,
+        received_at: asset.received_at.clone(),
+    }
 }
 
 enum AssetOutcome {
@@ -433,16 +560,11 @@ async fn process_candidate(
         .await;
     }
     emit(&state, CoreEvent::Stage("archive_verified"));
+    remove_inbox(&fault_injector, &source_path)?;
+    emit(&state, CoreEvent::Stage("inbox_removed"));
 
     if let Err(error) = fault_injector.check(FailurePoint::AssetRegistration) {
-        return record_archive_failure(
-            &dependencies,
-            &source_path,
-            &inbox_filename,
-            received_at,
-            injected_error(error),
-        )
-        .await;
+        return Err(injected_error(error));
     }
     let registered_asset = dependencies
         .database
@@ -480,8 +602,6 @@ async fn process_candidate(
         .map_err(database_error)?;
     emit(&state, CoreEvent::Stage("receipt_registered"));
     if duplicate {
-        remove_inbox(&fault_injector, &source_path)?;
-        emit(&state, CoreEvent::Stage("inbox_removed"));
         let mut guard = state.lock().map_err(|_| poisoned())?;
         guard.duplicate_receipts += 1;
         return Ok(AssetOutcome::Duplicate);
@@ -511,40 +631,47 @@ async fn process_candidate(
         .execute(attempt.start_command())
         .await
         .map_err(database_error)?;
+    state.lock().map_err(|_| poisoned())?.last_attempt_id = Some(attempt.attempt_id);
     emit(&state, CoreEvent::Stage("attempt_started"));
 
     if inject_failure {
-        let _ = fail_attempt(
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(fail_attempt_and_return(
             &dependencies.database,
             attempt.attempt_id,
-            "module_guest_error",
-            "synthetic parse failure",
+            IngestionError::AssetFailure {
+                code: "module_guest_error".to_owned(),
+                detail: "synthetic parse failure".to_owned(),
+            },
         )
-        .await;
-        emit(&state, CoreEvent::QualityChanged);
-        return Err(IngestionError::AssetFailure {
-            code: "module_guest_error".to_owned(),
-            detail: "synthetic parse failure".to_owned(),
-        });
+        .await);
     }
 
-    let asset: Arc<dyn ReadOnlyAsset> = Arc::new(FileAsset::open(
+    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
         registered_asset.asset_id,
         archived.archive_path.clone(),
         archived.original_filename.clone(),
-    )?);
-    increment_runtime_invocations(&state)?;
+    ) {
+        Ok(asset) => Arc::new(asset),
+        Err(error) => {
+            emit(&state, CoreEvent::QualityChanged);
+            return Err(
+                fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+            );
+        }
+    };
+    if let Err(error) = increment_runtime_invocations(&state) {
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+        );
+    }
     if let Err(error) = fault_injector.check(FailurePoint::GuestParse) {
         let injected = injected_error(error);
-        let _ = fail_attempt(
-            &dependencies.database,
-            attempt.attempt_id,
-            injected.code(),
-            &injected.to_string(),
-        )
-        .await;
         emit(&state, CoreEvent::QualityChanged);
-        return Err(injected);
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, injected).await,
+        );
     }
     let batch = dependencies
         .runtime
@@ -561,35 +688,70 @@ async fn process_candidate(
             batch
         }
         Err((code, detail)) => {
-            let _ = fail_attempt(&dependencies.database, attempt.attempt_id, &code, &detail).await;
             emit(&state, CoreEvent::QualityChanged);
-            return Err(IngestionError::AssetFailure { code, detail });
+            return Err(fail_attempt_and_return(
+                &dependencies.database,
+                attempt.attempt_id,
+                IngestionError::AssetFailure { code, detail },
+            )
+            .await);
         }
     };
+    if let Err(error) = fault_injector.check(FailurePoint::BuildBatch) {
+        let injected = injected_error(error);
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, injected).await,
+        );
+    }
     if let Err(error) = fault_injector.check(FailurePoint::HostValidation) {
         let injected = injected_error(error);
-        let _ = fail_attempt(
-            &dependencies.database,
-            attempt.attempt_id,
-            injected.code(),
-            &injected.to_string(),
-        )
-        .await;
         emit(&state, CoreEvent::QualityChanged);
-        return Err(injected);
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, injected).await,
+        );
     }
-    let validated = build_validated_batch(&attempt, &archived, &dependencies.source_module, batch)?;
-    validation::validate_batch(&validated).map_err(|error| IngestionError::AssetFailure {
-        code: error.code().to_owned(),
-        detail: error.to_string(),
-    })?;
+    let validated =
+        match build_validated_batch(&attempt, &archived, &dependencies.source_module, batch) {
+            Ok(validated) => validated,
+            Err(error) => {
+                emit(&state, CoreEvent::QualityChanged);
+                return Err(fail_attempt_and_return(
+                    &dependencies.database,
+                    attempt.attempt_id,
+                    error,
+                )
+                .await);
+            }
+        };
+    if let Err(error) = validation::validate_batch(&validated) {
+        let error = IngestionError::AssetFailure {
+            code: error.code().to_owned(),
+            detail: error.to_string(),
+        };
+        emit(&state, CoreEvent::QualityChanged);
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+        );
+    }
     emit(&state, CoreEvent::Stage("host_validated"));
-    for contract in extension_contracts(&validated, &dependencies.source_module)? {
-        dependencies
-            .database
-            .execute(contract)
-            .await
-            .map_err(database_error)?;
+    let contracts = match extension_contracts(&validated, &dependencies.source_module) {
+        Ok(contracts) => contracts,
+        Err(error) => {
+            emit(&state, CoreEvent::QualityChanged);
+            return Err(
+                fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+            );
+        }
+    };
+    for contract in contracts {
+        if let Err(error) = dependencies.database.execute(contract).await {
+            let error = database_error(error);
+            emit(&state, CoreEvent::QualityChanged);
+            return Err(
+                fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+            );
+        }
     }
     let result = dependencies
         .database
@@ -598,8 +760,6 @@ async fn process_candidate(
     match result {
         Ok(result) => {
             emit(&state, CoreEvent::Stage("snapshot_committed"));
-            remove_inbox(&fault_injector, &source_path)?;
-            emit(&state, CoreEvent::Stage("inbox_removed"));
             let _ = state.lock().map(|mut guard| guard.completed_assets += 1);
             if fault_injector.check(FailurePoint::EventEmission).is_err() {
                 let _ = state.lock().map(|mut guard| guard.event_failures += 1);
@@ -614,17 +774,12 @@ async fn process_candidate(
             Ok(AssetOutcome::Completed)
         }
         Err(error) => {
-            let _ = fail_attempt(
-                &dependencies.database,
-                attempt.attempt_id,
-                error.code(),
-                &error.to_string(),
-            )
-            .await;
-            Err(IngestionError::AssetFailure {
+            let error = IngestionError::AssetFailure {
                 code: error.code().to_owned(),
                 detail: error.to_string(),
-            })
+            };
+            emit(&state, CoreEvent::QualityChanged);
+            Err(fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await)
         }
     }
 }
@@ -636,6 +791,7 @@ async fn import_archived_asset(
     limits: RuntimeLimits,
     asset: mfa_archive::ArchiveRecord,
     allow_existing: bool,
+    attempt_tracker: Option<Arc<Mutex<Option<Uuid>>>>,
 ) -> Result<Option<Uuid>, IngestionError> {
     let archived = asset.into_archived_asset();
     let (module_version, source_api_version, mapping_version) = source_metadata(&source_module)?;
@@ -654,14 +810,22 @@ async fn import_archived_asset(
         })
         .await
         .map_err(database_error)?;
-    if !registered_asset.inserted && !allow_existing {
+    if !registered_asset.inserted && !registered_asset.needs_processing && !allow_existing {
         return Ok(None);
     }
-    let attempt_id = if allow_existing {
-        Uuid::new_v4()
-    } else {
-        archived.asset_id
-    };
+    database
+        .execute(RegisterReceipt {
+            receipt_id: Uuid::new_v4(),
+            source_module_id: archived.source_module_id.clone(),
+            inbox_path: archived.archive_path.to_string_lossy().into_owned(),
+            original_filename: archived.original_filename.clone(),
+            discovered_at: archived.received_at.clone(),
+            asset_id: Some(registered_asset.asset_id),
+            outcome: "accepted".to_owned(),
+        })
+        .await
+        .map_err(database_error)?;
+    let attempt_id = Uuid::new_v4();
     let attempt = AttemptIdentity {
         attempt_id,
         asset_id: registered_asset.asset_id,
@@ -678,30 +842,54 @@ async fn import_archived_asset(
         .execute(attempt.start_command())
         .await
         .map_err(database_error)?;
-    let asset: Arc<dyn ReadOnlyAsset> = Arc::new(FileAsset::open(
+    if let Some(attempt_tracker) = attempt_tracker
+        && let Ok(mut last_attempt_id) = attempt_tracker.lock()
+    {
+        *last_attempt_id = Some(attempt_id);
+    }
+    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
         registered_asset.asset_id,
         archived.archive_path.clone(),
         archived.original_filename.clone(),
-    )?);
-    let batch = runtime
-        .invoke_source(&source_module, asset, limits)
-        .await
-        .map_err(|error| IngestionError::AssetFailure {
+    ) {
+        Ok(asset) => Arc::new(asset),
+        Err(error) => return Err(fail_attempt_and_return(&database, attempt_id, error).await),
+    };
+    let batch = match runtime.invoke_source(&source_module, asset, limits).await {
+        Ok(batch) => batch,
+        Err(error) => {
+            let error = IngestionError::AssetFailure {
+                code: error.code().to_owned(),
+                detail: error.detail().to_owned(),
+            };
+            return Err(fail_attempt_and_return(&database, attempt_id, error).await);
+        }
+    };
+    let validated = match build_validated_batch(&attempt, &archived, &source_module, batch) {
+        Ok(validated) => validated,
+        Err(error) => return Err(fail_attempt_and_return(&database, attempt_id, error).await),
+    };
+    if let Err(error) = validation::validate_batch(&validated) {
+        let error = IngestionError::AssetFailure {
             code: error.code().to_owned(),
-            detail: error.detail().to_owned(),
-        })?;
-    let validated = build_validated_batch(&attempt, &archived, &source_module, batch)?;
-    validation::validate_batch(&validated).map_err(|error| IngestionError::AssetFailure {
-        code: error.code().to_owned(),
-        detail: error.to_string(),
-    })?;
-    for contract in extension_contracts(&validated, &source_module)? {
-        database.execute(contract).await.map_err(database_error)?;
+            detail: error.to_string(),
+        };
+        return Err(fail_attempt_and_return(&database, attempt_id, error).await);
     }
-    database
-        .execute(CommitSnapshot(Arc::new(validated)))
-        .await
-        .map_err(database_error)?;
+    let contracts = match extension_contracts(&validated, &source_module) {
+        Ok(contracts) => contracts,
+        Err(error) => return Err(fail_attempt_and_return(&database, attempt_id, error).await),
+    };
+    for contract in contracts {
+        if let Err(error) = database.execute(contract).await {
+            return Err(
+                fail_attempt_and_return(&database, attempt_id, database_error(error)).await,
+            );
+        }
+    }
+    if let Err(error) = database.execute(CommitSnapshot(Arc::new(validated))).await {
+        return Err(fail_attempt_and_return(&database, attempt_id, database_error(error)).await);
+    }
     Ok(Some(attempt_id))
 }
 
@@ -951,6 +1139,30 @@ async fn fail_attempt(
         .await
         .map(|_| ())
         .map_err(database_error)
+}
+
+async fn fail_attempt_and_return(
+    database: &DatabaseService,
+    attempt_id: Uuid,
+    error: IngestionError,
+) -> IngestionError {
+    let (code, detail) = attempt_error_details(&error);
+    if let Err(mark_error) = fail_attempt(database, attempt_id, &code, &detail).await {
+        return IngestionError::CriticalFailure {
+            code: "attempt_failure_recording_failed".to_owned(),
+            detail: format!("{error}; {mark_error}"),
+        };
+    }
+    error
+}
+
+fn attempt_error_details(error: &IngestionError) -> (String, String) {
+    match error {
+        IngestionError::AssetFailure { code, detail }
+        | IngestionError::TransientFailure { code, detail }
+        | IngestionError::CriticalFailure { code, detail } => (code.clone(), detail.clone()),
+        _ => (error.code().to_owned(), error.to_string()),
+    }
 }
 
 fn database_error(error: mfa_db::DatabaseError) -> IngestionError {

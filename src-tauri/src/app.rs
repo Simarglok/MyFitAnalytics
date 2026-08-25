@@ -1,5 +1,5 @@
 use crate::commands;
-use crate::events::spawn_event_forwarder;
+use crate::events::tauri_event_sink;
 use crate::state::AppState;
 use std::error::Error;
 use tauri::Manager;
@@ -27,16 +27,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let module_root = app.path().app_data_dir()?.join("modules");
     let state =
         AppState::from_roots_with_core_catalog(config_root, module_root, CORE_ENGLISH_CATALOG)?;
+    state.set_event_sink(tauri_event_sink(app.handle()));
     if let Some(workspace_root) = state.settings().workspace_root.clone() {
         tauri::async_runtime::block_on(state.configure_workspace(workspace_root))?;
-    }
-    if let Some(coordinator) = state
-        .storage_lock()
-        .map_err(|error| error.to_string())?
-        .as_ref()
-        .and_then(|storage| storage.coordinator.clone())
-    {
-        spawn_event_forwarder(app.handle(), coordinator);
     }
     app.manage(state);
     Ok(())

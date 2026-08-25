@@ -1,3 +1,4 @@
+use crate::events::{DataChangedSink, spawn_event_forwarders};
 use mfa_archive::{ArchiveCoordinator, ArchiveReconciler};
 use mfa_config::{
     AppPaths, AppSettings, PathPolicyError, SettingsError, SettingsStore, WorkspacePaths,
@@ -5,6 +6,7 @@ use mfa_config::{
 use mfa_db::{DatabaseError, DatabaseService};
 use mfa_ingestion::{
     IngestionCoordinator, IngestionDependencies, IngestionError, RecoveryGate, RecoveryService,
+    ScanReason, now_request,
 };
 use mfa_module_host::{
     CapabilityError, CapabilityRegistry, ComponentRuntime, InstalledModule, LocaleError,
@@ -44,7 +46,7 @@ impl AppStateError {
 pub(crate) struct StorageRuntime {
     pub workspace: WorkspacePaths,
     pub database: DatabaseService,
-    pub coordinator: Option<IngestionCoordinator>,
+    pub coordinators: Vec<IngestionCoordinator>,
     pub recovery_gate: RecoveryGate,
 }
 
@@ -56,6 +58,7 @@ pub struct AppState {
     config_root: PathBuf,
     default_app_data_root: PathBuf,
     storage: Mutex<Option<StorageRuntime>>,
+    event_sink: Mutex<Option<Arc<dyn DataChangedSink>>>,
 }
 
 impl AppState {
@@ -78,6 +81,7 @@ impl AppState {
             default_app_data_root: config_root.join("app-data"),
             config_root,
             storage: Mutex::new(None),
+            event_sink: Mutex::new(None),
         })
     }
 
@@ -100,6 +104,7 @@ impl AppState {
             default_app_data_root: config_root.join("app-data"),
             config_root,
             storage: Mutex::new(None),
+            event_sink: Mutex::new(None),
         })
     }
 
@@ -149,14 +154,15 @@ impl AppState {
                 detail: error.to_string(),
             })?;
         let workspace = WorkspacePaths::new(workspace_root.clone());
-        let source_module = self
+        let source_modules: Vec<InstalledModule> = self
             .modules
             .iter()
-            .find(|module| {
+            .filter(|module| {
                 module.enabled && module.module_type == mfa_contracts::ModuleType::Source
             })
-            .cloned();
-        if let Some(module) = &source_module {
+            .cloned()
+            .collect();
+        for module in &source_modules {
             workspace
                 .enable_source(&module.module_id)
                 .map_err(|error| AppStateError::Storage {
@@ -170,11 +176,13 @@ impl AppState {
                 detail: error.to_string(),
             })?;
         let recovery_gate = RecoveryGate::new();
-        let coordinator = if let Some(module) = source_module {
+        let mut coordinators = Vec::with_capacity(source_modules.len());
+        for module in source_modules {
             let reconciler = ArchiveReconciler::new(workspace.clone(), module.module_id.clone());
             let recovery =
                 RecoveryService::new(database.clone(), reconciler, recovery_gate.clone());
             if let Err(error) = recovery.startup().await {
+                shutdown_coordinators(coordinators).await;
                 let _ = database.clone().shutdown().await;
                 return Err(AppStateError::Storage {
                     detail: error.to_string(),
@@ -194,6 +202,7 @@ impl AppState {
             let coordinator = match IngestionCoordinator::start(dependencies) {
                 Ok(coordinator) => coordinator,
                 Err(error) => {
+                    shutdown_coordinators(coordinators).await;
                     let _ = database.clone().shutdown().await;
                     return Err(AppStateError::Storage {
                         detail: error.to_string(),
@@ -201,31 +210,75 @@ impl AppState {
                 }
             };
             coordinator.set_recovery_gate(recovery_gate.clone());
-            Some(coordinator)
-        } else {
+            if let Err(error) = coordinator
+                .request_scan(now_request(ScanReason::Startup))
+                .await
+            {
+                let mut to_shutdown = coordinators;
+                to_shutdown.push(coordinator);
+                shutdown_coordinators(to_shutdown).await;
+                let _ = database.clone().shutdown().await;
+                return Err(AppStateError::Storage {
+                    detail: error.to_string(),
+                });
+            }
+            coordinators.push(coordinator);
+        }
+        if coordinators.is_empty() {
             recovery_gate.complete();
-            None
-        };
+        }
 
         let settings_path = self.config_root.join("settings.json");
         let mut settings = self.settings();
         settings.workspace_root = Some(workspace_root);
         settings.app_data_root = Some(app_paths.app_data.clone());
-        SettingsStore::new(settings_path).save(&settings)?;
+        if let Err(error) = SettingsStore::new(settings_path).save(&settings) {
+            shutdown_coordinators(coordinators).await;
+            let _ = database.clone().shutdown().await;
+            return Err(error.into());
+        }
+        let event_sink = self
+            .event_sink
+            .lock()
+            .map_err(|_| AppStateError::Storage {
+                detail: "event sink state lock poisoned".to_owned(),
+            })?
+            .clone();
+        let forwarders = event_sink
+            .as_ref()
+            .map(|sink| (Arc::clone(sink), coordinators.clone()));
         let mut storage = self.storage.lock().map_err(|_| AppStateError::Storage {
             detail: "storage state lock poisoned".to_owned(),
         })?;
         *storage = Some(StorageRuntime {
             workspace: workspace.clone(),
             database,
-            coordinator,
+            coordinators,
             recovery_gate,
         });
         drop(storage);
         *self.settings.lock().map_err(|_| AppStateError::Storage {
             detail: "settings state lock poisoned".to_owned(),
         })? = settings;
+        if let Some((sink, coordinators)) = forwarders {
+            spawn_event_forwarders(sink, coordinators);
+        }
         Ok(workspace)
+    }
+
+    pub fn set_event_sink(&self, sink: Arc<dyn DataChangedSink>) {
+        if let Ok(mut event_sink) = self.event_sink.lock() {
+            *event_sink = Some(Arc::clone(&sink));
+        }
+        let coordinators = self
+            .storage
+            .lock()
+            .ok()
+            .and_then(|storage| storage.as_ref().map(|storage| storage.coordinators.clone()))
+            .unwrap_or_default();
+        if !coordinators.is_empty() {
+            spawn_event_forwarders(sink, coordinators);
+        }
     }
 
     pub(crate) fn storage_lock(
@@ -247,7 +300,7 @@ impl AppState {
         let Some(runtime) = runtime else {
             return Ok(());
         };
-        if let Some(coordinator) = runtime.coordinator {
+        for coordinator in runtime.coordinators {
             coordinator
                 .shutdown()
                 .await
@@ -262,6 +315,12 @@ impl AppState {
             .map_err(|error| AppStateError::Storage {
                 detail: error.to_string(),
             })
+    }
+}
+
+async fn shutdown_coordinators(coordinators: Vec<IngestionCoordinator>) {
+    for coordinator in coordinators {
+        let _ = coordinator.shutdown().await;
     }
 }
 
