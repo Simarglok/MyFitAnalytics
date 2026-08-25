@@ -18,3 +18,5 @@
 *.mfasource
 *.mfadashboard
 *.mfalocale
+!crates/mfa-module-host/tests/fixtures/
+!crates/mfa-module-host/tests/fixtures/*.mfasource
