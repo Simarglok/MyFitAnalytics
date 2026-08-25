@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri"]
-# Contract and installable module globs are added when their crates exist in Task 2.
+members = ["crates/*", "src-tauri"]
+# Installable module crates join the workspace when their plans add them.
 
 [workspace.package]
 version = "0.1.0"
@@ -17,5 +17,6 @@ semver = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+jsonschema = "0.33"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 wasmtime = { version = "=47.0.3", default-features = false, features = ["async", "component-model", "component-model-async", "cranelift", "runtime"] }

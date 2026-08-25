@@ -1,0 +1,6 @@
+package myfitanalytics:dashboard@1.0.0;
+
+world dashboard-module {
+  export describe: func() -> string;
+  export compose: func(input-json: string) -> result<string, string>;
+}
