@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimal capabilities for the MyFitAnalytics main window",
+  "description": "Main window access for typed application commands only",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": []
 }

@@ -2313,10 +2313,16 @@ dependencies = [
 name = "myfitanalytics"
 version = "0.1.0"
 dependencies = [
+ "mfa-config",
+ "mfa-contracts",
+ "mfa-module-host",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

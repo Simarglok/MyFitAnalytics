@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Minimal capabilities for the MyFitAnalytics main window","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Main window access for typed application commands only","local":true,"windows":["main"],"permissions":[]}}

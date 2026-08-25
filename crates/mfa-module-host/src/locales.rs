@@ -67,7 +67,19 @@ impl LocaleResolver {
         core_root: impl AsRef<Path>,
         modules: Vec<crate::InstalledModule>,
     ) -> Result<Self, LocaleError> {
-        let core = read_catalog(core_root.as_ref().join("messages.json"), "core")?;
+        let bytes = fs::read(core_root.as_ref().join("messages.json")).map_err(|error| {
+            LocaleError::Io {
+                detail: error.to_string(),
+            }
+        })?;
+        Self::from_core_json(&bytes, modules)
+    }
+
+    pub fn from_core_json(
+        bytes: &[u8],
+        modules: Vec<crate::InstalledModule>,
+    ) -> Result<Self, LocaleError> {
+        let core = read_catalog_bytes(bytes, "core")?;
         if core.locale != "en" || core.namespace != "core" {
             return Err(LocaleError::InvalidCatalog {
                 detail: "core catalog must declare locale en and namespace core".to_owned(),
@@ -207,8 +219,12 @@ fn read_catalog(path: impl AsRef<Path>, module_id: &str) -> Result<Catalog, Loca
     let bytes = fs::read(path).map_err(|error| LocaleError::Io {
         detail: error.to_string(),
     })?;
+    read_catalog_bytes(&bytes, module_id)
+}
+
+fn read_catalog_bytes(bytes: &[u8], module_id: &str) -> Result<Catalog, LocaleError> {
     let file: CatalogFile =
-        serde_json::from_slice(&bytes).map_err(|error| LocaleError::InvalidCatalog {
+        serde_json::from_slice(bytes).map_err(|error| LocaleError::InvalidCatalog {
             detail: error.to_string(),
         })?;
     if file.locale.trim().is_empty() || file.namespace.trim().is_empty() {
