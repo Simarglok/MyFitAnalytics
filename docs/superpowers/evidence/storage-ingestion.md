@@ -48,4 +48,18 @@ The gate uses only temporary app-data/workspace roots and synthetic fixture byte
 - `data-changed` emits only capability/dashboard IDs; the Svelte app reloads view models through `AppTransport`.
 - Settings expose configured workspace, inbox/archive, app-data, recovery, backup, and database paths without making iCloud a dependency.
 
-Final workspace-wide verification is recorded below after the fresh final commands are run.
+## Fresh final verification
+
+All commands below were run after the implementation commits and returned exit 0:
+
+| Command | Result |
+| --- | --- |
+| `cargo test --workspace -- --test-threads=1` | All workspace unit, integration, and doc tests passed |
+| `cargo fmt --all --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `pnpm --dir web test -- --run` | 3 files, 5 tests passed |
+| `pnpm --dir web exec svelte-check --tsconfig ./tsconfig.json` | 0 errors, 0 warnings |
+| `pnpm --dir web build` | Vite production build passed; 118 modules transformed |
+| `./scripts/storage-ingestion-gate.sh` | 1 storage-gate test and 4 Tauri command tests passed |
+| `git diff --check` | Passed |
+| `git status --short --branch` | Clean; `feat/storage-ingestion...origin/main [ahead 6]` |
