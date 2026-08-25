@@ -2688,6 +2688,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-ingestion"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mfa-archive",
+ "mfa-config",
+ "mfa-contracts",
+ "mfa-db",
+ "mfa-module-host",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "mfa-module-host"
 version = "0.1.0"
 dependencies = [
