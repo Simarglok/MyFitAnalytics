@@ -2219,6 +2219,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-config"
+version = "0.1.0"
+dependencies = [
+ "mfa-contracts",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "mfa-contracts"
 version = "0.1.0"
 dependencies = [
@@ -2236,6 +2247,7 @@ name = "mfa-module-host"
 version = "0.1.0"
 dependencies = [
  "jsonschema",
+ "mfa-config",
  "mfa-contracts",
  "semver",
  "serde",

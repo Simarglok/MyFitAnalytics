@@ -1,0 +1,10 @@
+{
+  "locale": "en",
+  "namespace": "core",
+  "messages": {
+    "app.title": "MyFitAnalytics",
+    "module.source": "Source module",
+    "module.dashboard": "Dashboard module",
+    "missing": "⟦missing:{key}⟧"
+  }
+}
