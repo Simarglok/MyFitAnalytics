@@ -174,8 +174,11 @@ impl RecoveryService {
         self.gate.clone()
     }
 
-    pub async fn startup(&self) -> Result<RecoveryReport, RecoveryError> {
-        let interrupted = self.database.execute(MarkInterrupted).await?.count;
+    pub async fn mark_interrupted(database: &DatabaseService) -> Result<u64, RecoveryError> {
+        Ok(database.execute(MarkInterrupted).await?.count)
+    }
+
+    pub async fn reconcile(&self) -> Result<RecoveryReport, RecoveryError> {
         let inventory = self.reconciler.scan()?;
         let assets = inventory
             .assets
@@ -198,12 +201,39 @@ impl RecoveryService {
                 assets,
             })
             .await?;
-        self.gate.complete();
         Ok(RecoveryReport {
-            interrupted_attempts: interrupted,
+            interrupted_attempts: 0,
             registered_assets: result.registered_assets,
             missing_assets: result.missing_assets,
             assets_to_ingest: result.assets_to_ingest.len() as u64,
         })
     }
+
+    pub async fn startup(&self) -> Result<RecoveryReport, RecoveryError> {
+        let interrupted = Self::mark_interrupted(&self.database).await?;
+        let mut report = self.reconcile().await?;
+        self.gate.complete();
+        report.interrupted_attempts = interrupted;
+        Ok(report)
+    }
+}
+
+pub async fn recover_sources(
+    database: DatabaseService,
+    reconcilers: Vec<ArchiveReconciler>,
+    gate: RecoveryGate,
+) -> Result<Vec<RecoveryReport>, RecoveryError> {
+    let interrupted = RecoveryService::mark_interrupted(&database).await?;
+    let mut reports = Vec::with_capacity(reconcilers.len());
+    for (index, reconciler) in reconcilers.into_iter().enumerate() {
+        let mut report = RecoveryService::new(database.clone(), reconciler, gate.clone())
+            .reconcile()
+            .await?;
+        if index == 0 {
+            report.interrupted_attempts = interrupted;
+        }
+        reports.push(report);
+    }
+    gate.complete();
+    Ok(reports)
 }

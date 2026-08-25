@@ -631,7 +631,13 @@ async fn process_candidate(
         .execute(attempt.start_command())
         .await
         .map_err(database_error)?;
-    state.lock().map_err(|_| poisoned())?.last_attempt_id = Some(attempt.attempt_id);
+    if let Err(error) = with_locked_state(&state, |guard| {
+        guard.last_attempt_id = Some(attempt.attempt_id);
+    }) {
+        return Err(
+            fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
+        );
+    }
     emit(&state, CoreEvent::Stage("attempt_started"));
 
     if inject_failure {
@@ -1141,6 +1147,19 @@ async fn fail_attempt(
         .map_err(database_error)
 }
 
+fn with_locked_state<T>(
+    state: &Mutex<T>,
+    update: impl FnOnce(&mut T),
+) -> Result<(), IngestionError> {
+    match state.lock() {
+        Ok(mut guard) => {
+            update(&mut guard);
+            Ok(())
+        }
+        Err(_) => Err(poisoned()),
+    }
+}
+
 async fn fail_attempt_and_return(
     database: &DatabaseService,
     attempt_id: Uuid,
@@ -1229,5 +1248,29 @@ impl ReadOnlyAsset for FileAsset {
             })?;
         bytes.truncate(read);
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_locked_state;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Mutex;
+
+    #[test]
+    fn poisoned_post_attempt_state_lock_is_reported() {
+        let state = Mutex::new(());
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = state.lock().unwrap();
+            panic!("poison post-attempt state lock");
+        }));
+        assert!(poisoned.is_err());
+
+        let error = with_locked_state(&state, |_| {}).unwrap_err();
+        assert!(matches!(
+            error,
+            crate::IngestionError::CriticalFailure { code, .. }
+                if code == "pipeline_state_poisoned"
+        ));
     }
 }

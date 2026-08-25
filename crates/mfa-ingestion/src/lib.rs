@@ -24,6 +24,6 @@ pub use rebuild::{
 };
 pub use recovery::{
     FailurePoint, FaultInjector, InjectedFailure, NoFaultInjector, RecoveryError, RecoveryGate,
-    RecoveryMode, RecoveryReport, RecoveryService, TestFaultInjector,
+    RecoveryMode, RecoveryReport, RecoveryService, TestFaultInjector, recover_sources,
 };
 pub use retry::{FailureClass, RetryClock, RetryPolicy, TokioRetryClock, retry_with_policy};

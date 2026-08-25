@@ -96,3 +96,70 @@ fn recovery_gate_rejects_ingestion_while_recovery_is_in_progress() {
     gate.complete();
     assert_eq!(gate.mode(), RecoveryMode::Normal);
 }
+
+#[tokio::test]
+async fn multi_source_recovery_marks_interrupted_once_before_releasing_gate() {
+    let temp = TempDir::new().unwrap();
+    let first_source = ModuleId::try_from("first-source").unwrap();
+    let second_source = ModuleId::try_from("second-source").unwrap();
+    let workspace = WorkspacePaths::new(temp.path().join("workspace"));
+    workspace.enable_source(&first_source).unwrap();
+    workspace.enable_source(&second_source).unwrap();
+    let database = DatabaseService::start(&temp.path().join("storage.duckdb"), 8)
+        .await
+        .unwrap();
+    let asset_id = Uuid::from_u128(7100);
+    database
+        .execute(RegisterAsset {
+            asset: AssetRegistration {
+                asset_id,
+                source_module_id: first_source.clone(),
+                asset_type: "fixture".to_owned(),
+                original_filename: "running.fixture".to_owned(),
+                archive_path: "/missing/running.fixture".to_owned(),
+                byte_sha256: "c".repeat(64),
+                file_size: 1,
+                received_at: UtcInstant::from(Utc::now()),
+            },
+        })
+        .await
+        .unwrap();
+    database
+        .execute(StartAttempt {
+            attempt_id: Uuid::from_u128(7101),
+            asset_id,
+            source_module_id: first_source.clone(),
+            source_module_version: "1.0.0".to_owned(),
+            source_module_package_sha256: "d".repeat(64),
+            source_api_version: "1.0.0".to_owned(),
+            mapping_version: "1.0.0".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            logical_snapshot_key: "first-source:default".to_owned(),
+            started_at: UtcInstant::from(Utc::now()),
+        })
+        .await
+        .unwrap();
+
+    let gate = RecoveryGate::new();
+    let first = RecoveryService::new(
+        database.clone(),
+        ArchiveReconciler::new(workspace.clone(), first_source),
+        gate.clone(),
+    );
+    let second = RecoveryService::new(
+        database.clone(),
+        ArchiveReconciler::new(workspace, second_source),
+        gate.clone(),
+    );
+    let interrupted = RecoveryService::mark_interrupted(&database).await.unwrap();
+    assert_eq!(interrupted, 1);
+    let first_report = first.reconcile().await.unwrap();
+    assert_eq!(first_report.interrupted_attempts, 0);
+    assert_eq!(gate.mode(), RecoveryMode::Recovery);
+    let second_report = second.reconcile().await.unwrap();
+    assert_eq!(second_report.interrupted_attempts, 0);
+    assert_eq!(gate.mode(), RecoveryMode::Recovery);
+    gate.complete();
+    assert_eq!(gate.mode(), RecoveryMode::Normal);
+    database.shutdown().await.unwrap();
+}

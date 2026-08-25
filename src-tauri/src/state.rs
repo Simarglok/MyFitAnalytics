@@ -5,8 +5,8 @@ use mfa_config::{
 };
 use mfa_db::{DatabaseError, DatabaseService};
 use mfa_ingestion::{
-    IngestionCoordinator, IngestionDependencies, IngestionError, RecoveryGate, RecoveryService,
-    ScanReason, now_request,
+    IngestionCoordinator, IngestionDependencies, IngestionError, RecoveryGate, ScanReason,
+    now_request, recover_sources,
 };
 use mfa_module_host::{
     CapabilityError, CapabilityRegistry, ComponentRuntime, InstalledModule, LocaleError,
@@ -176,18 +176,20 @@ impl AppState {
                 detail: error.to_string(),
             })?;
         let recovery_gate = RecoveryGate::new();
+        let reconcilers = source_modules
+            .iter()
+            .map(|module| ArchiveReconciler::new(workspace.clone(), module.module_id.clone()))
+            .collect();
+        if let Err(error) =
+            recover_sources(database.clone(), reconcilers, recovery_gate.clone()).await
+        {
+            let _ = database.clone().shutdown().await;
+            return Err(AppStateError::Storage {
+                detail: error.to_string(),
+            });
+        }
         let mut coordinators = Vec::with_capacity(source_modules.len());
         for module in source_modules {
-            let reconciler = ArchiveReconciler::new(workspace.clone(), module.module_id.clone());
-            let recovery =
-                RecoveryService::new(database.clone(), reconciler, recovery_gate.clone());
-            if let Err(error) = recovery.startup().await {
-                shutdown_coordinators(coordinators).await;
-                let _ = database.clone().shutdown().await;
-                return Err(AppStateError::Storage {
-                    detail: error.to_string(),
-                });
-            }
             let archive = ArchiveCoordinator::new(workspace.clone(), module.module_id.clone());
             let runtime = Arc::new(ComponentRuntime::default());
             let dependencies = IngestionDependencies {
@@ -223,9 +225,6 @@ impl AppState {
                 });
             }
             coordinators.push(coordinator);
-        }
-        if coordinators.is_empty() {
-            recovery_gate.complete();
         }
 
         let settings_path = self.config_root.join("settings.json");
