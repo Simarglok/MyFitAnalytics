@@ -2219,6 +2219,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-archive"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mfa-config",
+ "mfa-contracts",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "mfa-config"
 version = "0.1.0"
 dependencies = [

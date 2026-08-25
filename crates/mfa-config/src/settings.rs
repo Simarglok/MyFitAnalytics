@@ -13,6 +13,10 @@ pub struct AppSettings {
     pub schema_version: u32,
     pub locale: String,
     #[serde(default)]
+    pub workspace_root: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub app_data_root: Option<std::path::PathBuf>,
+    #[serde(default)]
     pub active_providers: BTreeMap<CapabilityId, ModuleId>,
 }
 
@@ -21,6 +25,8 @@ impl Default for AppSettings {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
             locale: "en-US".to_owned(),
+            workspace_root: None,
+            app_data_root: None,
             active_providers: BTreeMap::new(),
         }
     }

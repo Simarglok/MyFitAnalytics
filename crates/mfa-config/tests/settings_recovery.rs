@@ -14,6 +14,8 @@ fn settings() -> AppSettings {
     AppSettings {
         schema_version: CURRENT_SCHEMA_VERSION,
         locale: "en-US".to_owned(),
+        workspace_root: None,
+        app_data_root: None,
         active_providers,
     }
 }
