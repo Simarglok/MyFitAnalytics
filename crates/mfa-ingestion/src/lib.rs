@@ -11,10 +11,11 @@ pub use error::IngestionError;
 pub use events::{CoreEvent, WorkState};
 pub use health::{HealthSnapshot, HealthState};
 pub use pipeline::{
-    IngestionCoordinator, IngestionDependencies, RuntimeArchiveImporter, SourceInvoker,
+    IngestionCoordinator, IngestionDependencies, RetryResult, RuntimeArchiveImporter, SourceInvoker,
 };
 pub use queue::{
     BoxFuture, ScanExecutor, ScanQueue, ScanReason, ScanReport, ScanRequest, ScanTicket,
+    now_request,
 };
 pub use rebuild::{
     ArchiveAssetImporter, ArchiveRebuildConfig, ArchiveRebuildConfirmation, ArchiveRebuildResult,

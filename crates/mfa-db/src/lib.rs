@@ -15,10 +15,11 @@ use tokio::sync::{mpsc, oneshot};
 
 pub use command::{
     ArchiveAssetRecord, AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt,
-    FailAttemptResult, HealthCheck, HealthCheckResult, IntoDatabaseCommand, MarkInterrupted,
-    MarkInterruptedResult, QueryView, ReconcileArchive, ReconcileArchiveInventory,
-    ReconcileArchiveInventoryResult, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
-    RegisterReceipt, RegisterReceiptResult, Shutdown, StartAttempt, StartAttemptResult,
+    FailAttemptResult, HealthCheck, HealthCheckResult, IntoDatabaseCommand, ListQualityItems,
+    ListQualityItemsResult, MarkInterrupted, MarkInterruptedResult, QueryView, ReconcileArchive,
+    ReconcileArchiveInventory, ReconcileArchiveInventoryResult, ReconcileArchiveResult,
+    RegisterAsset, RegisterAssetResult, RegisterReceipt, RegisterReceiptResult, Shutdown,
+    StartAttempt, StartAttemptResult,
 };
 pub use error::DatabaseError;
 pub use fault::{

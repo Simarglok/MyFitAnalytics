@@ -4,7 +4,9 @@ use crate::queue::{BoxFuture, ScanExecutor, ScanQueue, ScanReport};
 use crate::rebuild::{ArchiveAssetImporter, RebuildError};
 use crate::recovery::{FailurePoint, FaultInjector, NoFaultInjector, RecoveryGate};
 
-use mfa_archive::{ArchiveCoordinator, ScanRequest, StableCandidate, StableScanner};
+use mfa_archive::{
+    ArchiveCoordinator, ArchiveReconciler, ScanRequest, StableCandidate, StableScanner,
+};
 use mfa_config::WorkspacePaths;
 use mfa_contracts::{
     AssetMetadata, AssetReadError, CanonicalObservation, ModuleId, ModuleManifest, ReadOnlyAsset,
@@ -53,6 +55,12 @@ pub struct RuntimeArchiveImporter {
     limits: RuntimeLimits,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryResult {
+    pub asset_id: Uuid,
+    pub attempt_id: Uuid,
+}
+
 impl RuntimeArchiveImporter {
     pub fn new(
         source_module: InstalledModule,
@@ -81,11 +89,12 @@ impl ArchiveAssetImporter for RuntimeArchiveImporter {
         let runtime = Arc::clone(&self.runtime);
         let limits = self.limits;
         Box::pin(async move {
-            import_archived_asset(database, module, runtime, limits, asset)
+            import_archived_asset(database, module, runtime, limits, asset, false)
                 .await
                 .map_err(|error| RebuildError::Importer {
                     detail: error.to_string(),
-                })
+                })?;
+            Ok(())
         })
     }
 
@@ -148,6 +157,7 @@ struct PipelineState {
     critical_failures: u64,
 }
 
+#[derive(Clone)]
 pub struct IngestionCoordinator {
     queue: ScanQueue,
     state: Arc<Mutex<PipelineState>>,
@@ -249,6 +259,48 @@ impl IngestionCoordinator {
             guard.failed_assets + guard.event_failures,
             guard.critical_failures,
         )
+    }
+
+    pub async fn retry_asset(&self, asset_id: Uuid) -> Result<RetryResult, IngestionError> {
+        let (dependencies, gate) = {
+            let guard = self.state.lock().map_err(|_| poisoned())?;
+            (guard.dependencies.clone(), guard.recovery_gate.clone())
+        };
+        gate.ensure_ingestion_allowed()?;
+        let inventory = ArchiveReconciler::new(
+            dependencies.workspace.clone(),
+            dependencies.source_module.module_id.clone(),
+        )
+        .scan()
+        .map_err(|error| IngestionError::CriticalFailure {
+            code: "retry_archive_scan_failed".to_owned(),
+            detail: error.to_string(),
+        })?;
+        let archived = inventory
+            .assets
+            .into_iter()
+            .find(|asset| asset.asset_id == asset_id)
+            .ok_or_else(|| IngestionError::AssetFailure {
+                code: "archive_asset_not_found".to_owned(),
+                detail: asset_id.to_string(),
+            })?;
+        let attempt_id = import_archived_asset(
+            dependencies.database,
+            dependencies.source_module,
+            dependencies.runtime,
+            dependencies.limits,
+            archived,
+            true,
+        )
+        .await?
+        .ok_or_else(|| IngestionError::AssetFailure {
+            code: "retry_not_started".to_owned(),
+            detail: asset_id.to_string(),
+        })?;
+        Ok(RetryResult {
+            asset_id,
+            attempt_id,
+        })
     }
 }
 
@@ -408,7 +460,7 @@ async fn process_candidate(
         })
         .await
         .map_err(database_error)?;
-    let duplicate = !registered_asset.inserted;
+    let duplicate = !registered_asset.inserted && !registered_asset.needs_processing;
     dependencies
         .database
         .execute(RegisterReceipt {
@@ -583,7 +635,8 @@ async fn import_archived_asset(
     runtime: Arc<dyn SourceInvoker>,
     limits: RuntimeLimits,
     asset: mfa_archive::ArchiveRecord,
-) -> Result<(), IngestionError> {
+    allow_existing: bool,
+) -> Result<Option<Uuid>, IngestionError> {
     let archived = asset.into_archived_asset();
     let (module_version, source_api_version, mapping_version) = source_metadata(&source_module)?;
     let registered_asset = database
@@ -601,11 +654,16 @@ async fn import_archived_asset(
         })
         .await
         .map_err(database_error)?;
-    if !registered_asset.inserted {
-        return Ok(());
+    if !registered_asset.inserted && !allow_existing {
+        return Ok(None);
     }
+    let attempt_id = if allow_existing {
+        Uuid::new_v4()
+    } else {
+        archived.asset_id
+    };
     let attempt = AttemptIdentity {
-        attempt_id: archived.asset_id,
+        attempt_id,
         asset_id: registered_asset.asset_id,
         source_module_id: archived.source_module_id.clone(),
         source_module_version: module_version,
@@ -644,7 +702,7 @@ async fn import_archived_asset(
         .execute(CommitSnapshot(Arc::new(validated)))
         .await
         .map_err(database_error)?;
-    Ok(())
+    Ok(Some(attempt_id))
 }
 
 async fn record_archive_failure(

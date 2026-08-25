@@ -1,14 +1,16 @@
 use crate::command::{
-    DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, MarkInterruptedResult,
-    ReconcileArchiveInventory, ReconcileArchiveInventoryResult, RegisterAsset, RegisterAssetResult,
-    RegisterReceipt, RegisterReceiptResult, StartAttempt, StartAttemptResult, ViewResponse,
+    DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, ListQualityItemsResult,
+    MarkInterruptedResult, ReconcileArchiveInventory, ReconcileArchiveInventoryResult,
+    RegisterAsset, RegisterAssetResult, RegisterReceipt, RegisterReceiptResult, StartAttempt,
+    StartAttemptResult, ViewResponse,
 };
 use crate::error::DatabaseError;
 use crate::fault::{DatabaseFailurePoint, DatabaseFaultInjector};
 use crate::migrations;
 use crate::provenance::{
-    ExtensionContractRegistration, ExtensionContractRegistrationResult, RecordCounts,
-    SnapshotCommitResult, ValidatedSnapshotBatch, canonical_entity_key, canonical_identity,
+    DataQualityItem, ExtensionContractRegistration, ExtensionContractRegistrationResult,
+    RecordCounts, SnapshotCommitResult, ValidatedSnapshotBatch, canonical_entity_key,
+    canonical_identity,
 };
 use crate::validation::{self, ValidationError};
 use crate::views::{QueryView, ViewRequest};
@@ -83,6 +85,9 @@ fn process_command(
         DatabaseCommand::ReconcileArchiveInventory(command, response) => {
             let _ = response.send(reconcile_archive_inventory(connection, command));
         }
+        DatabaseCommand::ListQualityItems(response) => {
+            let _ = response.send(list_quality_items(connection));
+        }
         DatabaseCommand::QueryView(command, response) => {
             let _ = response.send(query_view(connection, command));
         }
@@ -145,12 +150,23 @@ fn register_asset(
             |row| row.get::<_, String>(0),
         )
         .map_err(DatabaseError::from_duckdb)?;
-    let asset_id = asset_id.parse().map_err(|error| DatabaseError::Command {
-        detail: format!("stored asset identity is invalid: {error}"),
-    })?;
+    let asset_id = asset_id
+        .parse::<Uuid>()
+        .map_err(|error| DatabaseError::Command {
+            detail: format!("stored asset identity is invalid: {error}"),
+        })?;
+    let succeeded_attempts = connection
+        .query_row(
+            "SELECT COUNT(*) FROM ingestion_attempt
+             WHERE asset_id = ? AND status IN ('succeeded', 'superseded')",
+            params![asset_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(DatabaseError::from_duckdb)?;
     Ok(RegisterAssetResult {
         asset_id,
         inserted: inserted == 1,
+        needs_processing: succeeded_attempts == 0,
     })
 }
 
@@ -233,14 +249,15 @@ fn reconcile_archive_inventory(
                 .map_err(|error| DatabaseError::Command {
                     detail: format!("stored asset identity is invalid: {error}"),
                 })?;
-        let has_attempt = connection
+        let has_successful_attempt = connection
             .query_row(
-                "SELECT COUNT(*) FROM ingestion_attempt WHERE asset_id = ?",
+                "SELECT COUNT(*) FROM ingestion_attempt
+                 WHERE asset_id = ? AND status IN ('succeeded', 'superseded')",
                 params![stored_asset_id.to_string()],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(DatabaseError::from_duckdb)?;
-        if has_attempt == 0 {
+        if has_successful_attempt == 0 {
             let mut pending = asset;
             pending.asset_id = stored_asset_id;
             assets_to_ingest.push(pending);
@@ -885,6 +902,54 @@ fn changed_capabilities(
         }
     }
     Ok(capabilities.into_iter().collect())
+}
+
+fn list_quality_items(connection: &Connection) -> Result<ListQualityItemsResult, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT data_quality_item_id, item_type, source_asset_id, source_record_id,
+                    severity, message, status, created_at, resolved_at
+             FROM data_quality_item
+             ORDER BY created_at, data_quality_item_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map([], |row| {
+            let source_asset_id = row
+                .get::<_, Option<String>>(2)?
+                .map(|value| value.parse::<Uuid>())
+                .transpose()
+                .map_err(|error| {
+                    duckdb::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        error.to_string(),
+                    )))
+                })?;
+            let created_at = row.get::<_, chrono::NaiveDateTime>(7)?;
+            let resolved_at = row.get::<_, Option<chrono::NaiveDateTime>>(8)?;
+            Ok(DataQualityItem {
+                data_quality_item_id: row.get(0)?,
+                item_type: row.get(1)?,
+                source_asset_id,
+                source_record_id: row.get(3)?,
+                severity: row.get(4)?,
+                message: row.get(5)?,
+                status: row.get(6)?,
+                created_at: mfa_contracts::UtcInstant::from(
+                    chrono::DateTime::<Utc>::from_naive_utc_and_offset(created_at, Utc),
+                ),
+                resolved_at: resolved_at.map(|value| {
+                    mfa_contracts::UtcInstant::from(
+                        chrono::DateTime::<Utc>::from_naive_utc_and_offset(value, Utc),
+                    )
+                }),
+            })
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    let items = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)?;
+    Ok(ListQualityItemsResult { items })
 }
 
 fn query_view(connection: &Connection, command: QueryView) -> Result<ViewResponse, DatabaseError> {

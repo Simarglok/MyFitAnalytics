@@ -1,7 +1,7 @@
 use crate::error::DatabaseError;
 use crate::provenance::{
-    ExtensionContractRegistration, ExtensionContractRegistrationResult, SnapshotCommitResult,
-    ValidatedSnapshotBatch,
+    DataQualityItem, ExtensionContractRegistration, ExtensionContractRegistrationResult,
+    SnapshotCommitResult, ValidatedSnapshotBatch,
 };
 pub use crate::views::{QueryView, ViewResponse};
 use mfa_contracts::{ModuleId, UtcInstant};
@@ -31,6 +31,7 @@ pub struct RegisterAsset {
 pub struct RegisterAssetResult {
     pub asset_id: Uuid,
     pub inserted: bool,
+    pub needs_processing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +141,14 @@ pub struct ReconcileArchiveInventoryResult {
     pub assets_to_ingest: Vec<ArchiveAssetRecord>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ListQualityItems;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListQualityItemsResult {
+    pub items: Vec<DataQualityItem>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommitSnapshot(pub Arc<ValidatedSnapshotBatch>);
 
@@ -171,6 +180,7 @@ pub enum DatabaseCommand {
         ReconcileArchiveInventory,
         oneshot::Sender<Result<ReconcileArchiveInventoryResult, DatabaseError>>,
     ),
+    ListQualityItems(oneshot::Sender<Result<ListQualityItemsResult, DatabaseError>>),
     QueryView(
         QueryView,
         oneshot::Sender<Result<ViewResponse, DatabaseError>>,
@@ -262,6 +272,15 @@ impl IntoDatabaseCommand<ReconcileArchiveInventoryResult> for ReconcileArchiveIn
         response: oneshot::Sender<Result<ReconcileArchiveInventoryResult, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::ReconcileArchiveInventory(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<ListQualityItemsResult> for ListQualityItems {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<ListQualityItemsResult, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::ListQualityItems(response)
     }
 }
 

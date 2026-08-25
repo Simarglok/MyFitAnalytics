@@ -2706,6 +2706,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "mfa-archive",
+ "mfa-config",
+ "mfa-contracts",
+ "mfa-db",
+ "mfa-ingestion",
+ "mfa-module-host",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "mfa-module-host"
 version = "0.1.0"
 dependencies = [
@@ -2776,8 +2791,11 @@ dependencies = [
 name = "myfitanalytics"
 version = "0.1.0"
 dependencies = [
+ "mfa-archive",
  "mfa-config",
  "mfa-contracts",
+ "mfa-db",
+ "mfa-ingestion",
  "mfa-module-host",
  "serde",
  "serde_json",
@@ -2786,6 +2804,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -1,8 +1,23 @@
-import type { BootstrapState, ModuleView } from './types';
+import type {
+  AttemptView,
+  BootstrapState,
+  IngestionStatus,
+  ModuleView,
+  QualityItem,
+  ScanTicket,
+  DataChangedEvent,
+  WorkspaceView,
+} from './types';
 
 export interface AppTransport {
   getBootstrapState(): Promise<BootstrapState>;
   listModules(): Promise<ModuleView[]>;
+  setWorkspaceRoot(path: string): Promise<WorkspaceView>;
+  refreshNow(): Promise<ScanTicket>;
+  getIngestionStatus(): Promise<IngestionStatus>;
+  listQualityItems(): Promise<QualityItem[]>;
+  retryAsset(assetId: string): Promise<AttemptView>;
+  subscribeDataChanged(listener: (event: DataChangedEvent) => void): Promise<() => void>;
 }
 
 export interface SerializedCommandError {
