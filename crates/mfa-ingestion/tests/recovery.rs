@@ -4,7 +4,7 @@ use mfa_archive::{ArchiveCoordinator, FileFingerprint, StableCandidate};
 use mfa_config::WorkspacePaths;
 use mfa_contracts::{ModuleId, UtcInstant};
 use mfa_db::{AssetRegistration, DatabaseService, RegisterAsset, StartAttempt};
-use mfa_ingestion::{RecoveryGate, RecoveryMode, RecoveryService};
+use mfa_ingestion::{RecoveryError, RecoveryGate, RecoveryMode, RecoveryService, recover_sources};
 use std::fs;
 use std::time::SystemTime;
 use tempfile::TempDir;
@@ -97,14 +97,34 @@ fn recovery_gate_rejects_ingestion_while_recovery_is_in_progress() {
     assert_eq!(gate.mode(), RecoveryMode::Normal);
 }
 
+fn archive_fixture(workspace: &WorkspacePaths, source: &ModuleId, name: &str, bytes: &[u8]) {
+    let inbox_path = workspace.source_inbox(source).join(name);
+    fs::write(&inbox_path, bytes).unwrap();
+    let metadata = fs::metadata(&inbox_path).unwrap();
+    ArchiveCoordinator::new(workspace.clone(), source.clone())
+        .archive(
+            StableCandidate {
+                path: inbox_path.clone(),
+                fingerprint: FileFingerprint {
+                    size: metadata.len(),
+                    modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                },
+            },
+            UtcInstant::from(Utc::now()),
+        )
+        .unwrap();
+    fs::remove_file(inbox_path).unwrap();
+}
+
 #[tokio::test]
-async fn multi_source_recovery_marks_interrupted_once_before_releasing_gate() {
+async fn recover_sources_marks_interrupted_once_orders_reports_and_releases_gate() {
     let temp = TempDir::new().unwrap();
     let first_source = ModuleId::try_from("first-source").unwrap();
     let second_source = ModuleId::try_from("second-source").unwrap();
     let workspace = WorkspacePaths::new(temp.path().join("workspace"));
     workspace.enable_source(&first_source).unwrap();
     workspace.enable_source(&second_source).unwrap();
+    archive_fixture(&workspace, &first_source, "first.fixture", b"first archive");
     let database = DatabaseService::start(&temp.path().join("storage.duckdb"), 8)
         .await
         .unwrap();
@@ -141,25 +161,63 @@ async fn multi_source_recovery_marks_interrupted_once_before_releasing_gate() {
         .unwrap();
 
     let gate = RecoveryGate::new();
-    let first = RecoveryService::new(
+    let reports = recover_sources(
         database.clone(),
-        ArchiveReconciler::new(workspace.clone(), first_source),
+        vec![
+            ArchiveReconciler::new(workspace.clone(), first_source),
+            ArchiveReconciler::new(workspace, second_source),
+        ],
         gate.clone(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].interrupted_attempts, 1);
+    assert_eq!(reports[1].interrupted_attempts, 0);
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.interrupted_attempts)
+            .sum::<u64>(),
+        1
     );
-    let second = RecoveryService::new(
-        database.clone(),
-        ArchiveReconciler::new(workspace, second_source),
-        gate.clone(),
-    );
-    let interrupted = RecoveryService::mark_interrupted(&database).await.unwrap();
-    assert_eq!(interrupted, 1);
-    let first_report = first.reconcile().await.unwrap();
-    assert_eq!(first_report.interrupted_attempts, 0);
-    assert_eq!(gate.mode(), RecoveryMode::Recovery);
-    let second_report = second.reconcile().await.unwrap();
-    assert_eq!(second_report.interrupted_attempts, 0);
-    assert_eq!(gate.mode(), RecoveryMode::Recovery);
-    gate.complete();
+    assert_eq!(reports[0].registered_assets, 1);
+    assert_eq!(reports[0].assets_to_ingest, 1);
+    assert_eq!(reports[1].registered_assets, 0);
+    assert_eq!(reports[1].assets_to_ingest, 0);
     assert_eq!(gate.mode(), RecoveryMode::Normal);
+    database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recover_sources_keeps_gate_blocked_when_second_reconciliation_fails() {
+    let temp = TempDir::new().unwrap();
+    let first_source = ModuleId::try_from("first-source").unwrap();
+    let second_source = ModuleId::try_from("second-source").unwrap();
+    let workspace = WorkspacePaths::new(temp.path().join("workspace"));
+    workspace.enable_source(&first_source).unwrap();
+    workspace.enable_source(&second_source).unwrap();
+    archive_fixture(&workspace, &first_source, "first.fixture", b"first archive");
+    let second_archive = workspace.source_archive(&second_source);
+    fs::remove_dir_all(&second_archive).unwrap();
+    fs::write(&second_archive, b"not an archive directory").unwrap();
+    let database = DatabaseService::start(&temp.path().join("storage.duckdb"), 8)
+        .await
+        .unwrap();
+    let gate = RecoveryGate::new();
+
+    let result = recover_sources(
+        database.clone(),
+        vec![
+            ArchiveReconciler::new(workspace.clone(), first_source),
+            ArchiveReconciler::new(workspace, second_source),
+        ],
+        gate.clone(),
+    )
+    .await;
+
+    assert!(matches!(result, Err(RecoveryError::Archive(_))));
+    assert_eq!(gate.mode(), RecoveryMode::Recovery);
     database.shutdown().await.unwrap();
 }
