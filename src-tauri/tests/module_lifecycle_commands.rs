@@ -349,6 +349,50 @@ async fn finalization_failure_rolls_back_the_complete_uninstall_transaction() {
 }
 
 #[tokio::test]
+async fn registry_refresh_failure_rolls_back_before_uninstall_finalization() {
+    let (state, root) = state();
+    for package in [fixture_package(), bundled_package("hevy.mfasource")] {
+        let install_dialog = MockDialogs::with_package(package);
+        myfitanalytics::commands::choose_and_install_module_inner(&state, &install_dialog)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    myfitanalytics::commands::set_module_enabled_inner(&state, "fixture-source".to_owned(), false)
+        .await
+        .unwrap();
+
+    state.set_uninstall_finalization_fault(Some(
+        mfa_module_host::UninstallFinalizationFault::BeforeRegistryRefresh,
+    ));
+
+    let error =
+        myfitanalytics::commands::uninstall_module_inner(&state, "fixture-source".to_owned())
+            .await
+            .unwrap_err();
+    assert_eq!(error.code, "atomic_uninstall_failed");
+
+    let state_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("modules/state.json")).unwrap()).unwrap();
+    assert!(state_json["active_packages"]["fixture-source"].is_object());
+    assert!(
+        state_json["uninstalled_modules"]
+            .as_array()
+            .is_none_or(|ids| !ids.iter().any(|id| id == "fixture-source"))
+    );
+    assert!(
+        root.path()
+            .join("modules/fixture-source/1.0.0")
+            .join(
+                state_json["active_packages"]["fixture-source"]["package_hash"]
+                    .as_str()
+                    .unwrap()
+            )
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn source_inbox_change_reconfigures_the_coordinator_to_the_new_directory() {
     let (state, root) = state();
     for package in [fixture_package(), bundled_package("hevy.mfasource")] {

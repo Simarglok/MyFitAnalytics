@@ -416,6 +416,21 @@ impl AppState {
     pub(crate) fn refresh_registry(&self) -> Result<(), AppStateError> {
         let installer = self.package_installer();
         let modules = installer.list()?;
+        self.refresh_registry_from_modules(modules)
+    }
+
+    pub(crate) fn refresh_registry_during_uninstall(
+        &self,
+        installer: &PackageInstaller,
+    ) -> Result<(), AppStateError> {
+        let modules = installer.list_without_recovery()?;
+        self.refresh_registry_from_modules(modules)
+    }
+
+    fn refresh_registry_from_modules(
+        &self,
+        modules: Vec<InstalledModule>,
+    ) -> Result<(), AppStateError> {
         let settings = self.settings();
         let providers = CapabilityRegistry::new().resolve_runtime(&modules, &settings)?;
         let locale = LocaleResolver::from_core_json(&self.core_catalog, modules.clone())?;

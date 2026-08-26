@@ -89,6 +89,7 @@ pub enum UninstallFinalizationFault {
     AfterReadBeforeRemoveVersion,
     AfterRemoveBeforeSync,
     BeforeBackupDelete,
+    BeforeRegistryRefresh,
     BeforeRestoreMove,
     BeforeRestoreRead,
     BeforeStateSync,
@@ -378,6 +379,11 @@ impl PackageInstaller {
                 }
             })
             .collect())
+    }
+
+    pub fn list_without_recovery(&self) -> Result<Vec<InstalledModule>, PackageError> {
+        self.check_uninstall_fault(UninstallFinalizationFault::BeforeRegistryRefresh)?;
+        self.current_registry_without_recovery()
     }
 
     pub fn set_enabled(&self, id: &ModuleId, enabled: bool) -> Result<(), PackageError> {
@@ -942,6 +948,10 @@ impl PackageInstaller {
 
     pub(crate) fn current_registry(&self) -> Result<Vec<InstalledModule>, PackageError> {
         self.recover_pending_uninstall()?;
+        self.current_registry_without_recovery()
+    }
+
+    fn current_registry_without_recovery(&self) -> Result<Vec<InstalledModule>, PackageError> {
         let modules = self.reconstruct_registry()?;
         let mut state = load_state(&self.store_root)?;
         let mut current = std::collections::BTreeMap::<String, InstalledModule>::new();

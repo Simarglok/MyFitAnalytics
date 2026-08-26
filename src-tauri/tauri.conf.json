@@ -26,6 +26,8 @@
   },
   "bundle": {
     "active": true,
-    "resources": ["../dist/modules/*.mfasource"]
+    "resources": {
+      "../dist/modules/*.mfasource": "modules/"
+    }
   }
 }

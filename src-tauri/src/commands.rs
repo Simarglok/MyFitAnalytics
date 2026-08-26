@@ -421,7 +421,7 @@ pub async fn uninstall_module_inner(
         let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
         return Err(rollback.unwrap_or_else(|| command_error(error.code(), &error.to_string())));
     }
-    if let Err(error) = state.refresh_registry() {
+    if let Err(error) = state.refresh_registry_during_uninstall(&installer) {
         let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
         return Err(rollback.unwrap_or_else(|| error.into()));
     }

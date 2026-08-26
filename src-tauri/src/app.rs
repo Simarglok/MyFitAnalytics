@@ -5,10 +5,12 @@ use mfa_config::SettingsStore;
 use mfa_contracts::ModuleManifest;
 use mfa_module_host::{CapabilityRegistry, ModuleRegistry, PackageInstaller};
 use std::error::Error;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 const CORE_ENGLISH_CATALOG: &[u8] = include_bytes!("../../modules/locales/en/messages.json");
+const BUNDLED_SOURCE_PACKAGES: [&str; 2] = ["mynetdiary", "hevy"];
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     tauri::Builder::default()
@@ -58,11 +60,7 @@ fn install_bundled_modules(
 ) -> Result<Vec<(mfa_contracts::ModuleId, std::path::PathBuf)>, Box<dyn Error>> {
     let installer = PackageInstaller::new(module_root);
     let resource_root = app.path().resource_dir()?.join("modules");
-    let packages = ["mynetdiary", "hevy"]
-        .into_iter()
-        .map(|module| resource_root.join(format!("{module}.mfasource")))
-        .filter(|package| package.exists())
-        .collect::<Vec<_>>();
+    let packages = bundled_package_paths(&resource_root)?;
     installer.install_bundled_defaults(&packages)?;
     let mut registered = Vec::new();
     for package in packages {
@@ -75,6 +73,23 @@ fn install_bundled_modules(
         registered.push((module_id, package));
     }
     Ok(registered)
+}
+
+fn bundled_package_paths(resource_root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    BUNDLED_SOURCE_PACKAGES
+        .iter()
+        .map(|module| {
+            let package = resource_root.join(format!("{module}.mfasource"));
+            match fs::metadata(&package) {
+                Ok(metadata) if metadata.is_file() => Ok(package),
+                Ok(_) => Err(format!("bundled module resource is not a file: {package:?}").into()),
+                Err(error) => Err(format!(
+                    "bundled module resource is unavailable: {package:?}: {error}"
+                )
+                .into()),
+            }
+        })
+        .collect()
 }
 
 fn apply_bundled_provider_defaults(
@@ -91,10 +106,11 @@ fn apply_bundled_provider_defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_bundled_provider_defaults;
+    use super::{apply_bundled_provider_defaults, bundled_package_paths};
     use mfa_config::{CURRENT_SCHEMA_VERSION, SettingsStore};
     use mfa_contracts::{CapabilityId, ModuleId};
     use mfa_module_host::PackageInstaller;
+    use serde_json::Value;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -133,5 +149,39 @@ mod tests {
         apply_bundled_provider_defaults(&config_root, &module_root).unwrap();
         let retained = store.load().unwrap();
         assert_eq!(retained, settings);
+    }
+
+    #[test]
+    fn tauri_bundles_source_packages_under_the_runtime_modules_directory() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let resources = config["bundle"]["resources"]
+            .as_object()
+            .expect("bundled source packages must declare an explicit target directory");
+
+        assert_eq!(
+            resources.get("../dist/modules/*.mfasource"),
+            Some(&Value::String("modules/".to_owned()))
+        );
+    }
+
+    #[test]
+    fn bundled_package_paths_require_mynetdiary_and_hevy() {
+        let temp = TempDir::new().unwrap();
+        let resource_root = temp.path().join("modules");
+        std::fs::create_dir_all(&resource_root).unwrap();
+        std::fs::write(resource_root.join("hevy.mfasource"), b"synthetic").unwrap();
+
+        let error = bundled_package_paths(&resource_root).unwrap_err();
+        assert!(error.to_string().contains("mynetdiary.mfasource"));
+
+        std::fs::write(resource_root.join("mynetdiary.mfasource"), b"synthetic").unwrap();
+        let packages = bundled_package_paths(&resource_root).unwrap();
+        assert_eq!(
+            packages,
+            vec![
+                resource_root.join("mynetdiary.mfasource"),
+                resource_root.join("hevy.mfasource")
+            ]
+        );
     }
 }
