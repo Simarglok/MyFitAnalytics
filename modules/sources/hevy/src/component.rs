@@ -11,7 +11,7 @@ export!(Component);
 
 impl Guest for Component {
     fn metadata() -> String {
-        r#"{"module_id":"hevy","module_version":"1.0.0","source_api_version":"1.0.0","mapping_version":"1.0.0","provided_capabilities":["body.weight","body.fat_percentage"],"extension_contracts":["hevy.body-circumference@1.0.0"],"localization_namespace":"source.hevy"}"#.to_owned()
+        r#"{"module_id":"hevy","module_version":"1.0.0","source_api_version":"1.0.0","mapping_version":"1.0.0","provided_capabilities":["body.weight","body.fat_percentage","strength.sessions","strength.sets"],"extension_contracts":["hevy.body-circumference@1.0.0"],"localization_namespace":"source.hevy"}"#.to_owned()
     }
 
     fn contract_version() -> String {
@@ -19,30 +19,24 @@ impl Guest for Component {
     }
 
     fn detect(asset: &AssetReader) -> u8 {
-        let bytes = match read_asset(asset) {
-            Ok(bytes) => bytes,
-            Err(_) => return 0,
-        };
-        let mut memory = MemoryAsset { bytes };
-        match crate::detect_hevy(&mut memory) {
-            crate::ProbeResult::Match(crate::HevyArtifact::Measurements) => 100,
-            _ => 0,
-        }
+        read_asset(asset)
+            .ok()
+            .and_then(|bytes| match probe(&bytes) {
+                Ok(_) => Some(100),
+                Err(_) => None,
+            })
+            .unwrap_or(0)
     }
 
     fn validate(asset: &AssetReader) -> Result<String, String> {
         let metadata = asset.metadata();
-        let input = crate::CsvInput::new(read_asset(asset)?, metadata.asset_id);
-        let result = crate::context_for_measurements(&input)
-            .and_then(|context| crate::parse_measurements(input, &context).map(|_| context));
-        match result {
+        let bytes = read_asset(asset)?;
+        match validate_input(&bytes, metadata.asset_id) {
             Ok(context) => serde_json::to_string(&SourceValidation {
                 valid: true,
                 issues: Vec::new(),
                 source_module_id: context.module_id,
-                source_api_version: "1.0.0"
-                    .parse::<mfa_contracts::ContractVersion>()
-                    .map_err(|error| error.to_string())?,
+                source_api_version: version()?,
                 logical_snapshot_key: context.logical_snapshot_key,
                 schema_fingerprint: context.schema_fingerprint,
                 mapping_version: context.mapping_version,
@@ -56,16 +50,12 @@ impl Guest for Component {
                     source_record_key: None,
                 }],
                 source_module_id: "hevy".to_owned(),
-                source_api_version: "1.0.0"
-                    .parse::<mfa_contracts::ContractVersion>()
-                    .map_err(|error| error.to_string())?,
-                logical_snapshot_key: "hevy:measurements:invalid".to_owned(),
+                source_api_version: version()?,
+                logical_snapshot_key: "hevy:invalid".to_owned(),
                 schema_fingerprint:
                     "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                         .to_owned(),
-                mapping_version: "1.0.0"
-                    .parse::<mfa_contracts::ContractVersion>()
-                    .map_err(|error| error.to_string())?,
+                mapping_version: version()?,
             })
             .map_err(|error| error.to_string()),
         }
@@ -73,12 +63,66 @@ impl Guest for Component {
 
     fn parse(asset: &AssetReader) -> Result<String, String> {
         let metadata = asset.metadata();
-        let input = crate::CsvInput::new(read_asset(asset)?, metadata.asset_id);
-        let context = crate::context_for_measurements(&input)
-            .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
-        let batch = crate::parse_measurements(input, &context)
-            .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
+        let bytes = read_asset(asset)?;
+        let input = crate::CsvInput::new(bytes, metadata.asset_id);
+        let batch = match probe(&input.bytes)
+            .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+        {
+            crate::HevyArtifact::Measurements => {
+                let context = crate::context_for_measurements(&input)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
+                crate::parse_measurements(input, &context)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+            }
+            crate::HevyArtifact::Workouts => {
+                let context = crate::context_for_workouts(&input)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
+                crate::parse_workouts(input, &crate::ExerciseMapping::default(), &context)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+            }
+        };
         serde_json::to_string(&batch).map_err(|error| error.to_string())
+    }
+}
+
+fn version() -> Result<mfa_contracts::ContractVersion, String> {
+    "1.0.0"
+        .parse::<mfa_contracts::ContractVersion>()
+        .map_err(|error| error.to_string())
+}
+
+fn probe(bytes: &[u8]) -> Result<crate::HevyArtifact, crate::MappingError> {
+    let mut memory = MemoryAsset {
+        bytes: bytes.to_vec(),
+    };
+    match crate::detect_hevy(&mut memory) {
+        crate::ProbeResult::Match(artifact) => Ok(artifact),
+        crate::ProbeResult::InvalidUtf8 => Err(crate::MappingError::InvalidUtf8),
+        crate::ProbeResult::InvalidSchema => Err(crate::MappingError::InvalidCsv {
+            detail: "duplicate or malformed Hevy headers".to_owned(),
+        }),
+        crate::ProbeResult::NoMatch => Err(crate::MappingError::InvalidCsv {
+            detail: "unsupported Hevy artifact headers".to_owned(),
+        }),
+    }
+}
+
+fn validate_input(
+    bytes: &[u8],
+    asset_id: String,
+) -> Result<crate::MappingContext, crate::MappingError> {
+    let input = crate::CsvInput::new(bytes.to_vec(), asset_id);
+    match probe(bytes)? {
+        crate::HevyArtifact::Measurements => {
+            let context = crate::context_for_measurements(&input)?;
+            crate::parse_measurements(input, &context)?;
+            Ok(context)
+        }
+        crate::HevyArtifact::Workouts => {
+            let context = crate::context_for_workouts(&input)?;
+            crate::parse_workouts(input, &crate::ExerciseMapping::default(), &context)?;
+            Ok(context)
+        }
     }
 }
 

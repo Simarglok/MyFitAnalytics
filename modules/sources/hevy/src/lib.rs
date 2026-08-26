@@ -1,6 +1,7 @@
 pub mod csv_input;
 pub mod error;
 pub mod measurements;
+pub mod workouts;
 
 #[cfg(target_arch = "wasm32")]
 mod component;
@@ -11,6 +12,10 @@ use sha2::{Digest, Sha256};
 pub use csv_input::{CsvInput, GuestAssetReader, HevyArtifact, ProbeResult, detect_hevy};
 pub use error::MappingError;
 pub use measurements::{context_for_measurements, parse_measurements};
+pub use workouts::{
+    ExerciseMapping, WorkoutGroup, WorkoutRow, assign_exercise_blocks, context_for_workouts,
+    group_sessions, parse_workout_rows, parse_workouts,
+};
 
 #[derive(Debug, Clone)]
 pub struct MappingContext {
@@ -44,6 +49,20 @@ impl MappingContext {
             mapping_version: "1.0.0".parse().expect("valid mapping version"),
             schema_fingerprint,
             logical_snapshot_key: format!("hevy:measurements:{year}"),
+        }
+    }
+
+    pub fn for_workouts(
+        asset_id: impl Into<String>,
+        year: i32,
+        schema_fingerprint: String,
+    ) -> Self {
+        Self {
+            module_id: "hevy".to_owned(),
+            asset_id: asset_id.into(),
+            mapping_version: "1.0.0".parse().expect("valid mapping version"),
+            schema_fingerprint,
+            logical_snapshot_key: format!("hevy:workouts:{year}"),
         }
     }
 }

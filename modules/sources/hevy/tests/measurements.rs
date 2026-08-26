@@ -44,7 +44,10 @@ fn probe_matches_measurements_by_headers_not_filename() {
     let mut workout = MemoryAsset {
         bytes: fixture("workout_data.csv"),
     };
-    assert_eq!(detect_hevy(&mut workout), ProbeResult::NoMatch);
+    assert_eq!(
+        detect_hevy(&mut workout),
+        ProbeResult::Match(HevyArtifact::Workouts)
+    );
 }
 
 #[test]

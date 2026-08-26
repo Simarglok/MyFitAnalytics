@@ -6,7 +6,7 @@
   "source_api_version": "1.0.0",
   "mapping_version": "1.0.0",
   "compatible_app_versions": [">=0.1.0"],
-  "provided_capabilities": ["body.weight", "body.fat_percentage"],
+  "provided_capabilities": ["body.weight", "body.fat_percentage", "strength.sessions", "strength.sets"],
   "accepted_file_patterns": ["*.csv", "text/csv"],
   "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
   "extension_contracts": [

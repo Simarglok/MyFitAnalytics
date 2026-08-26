@@ -69,6 +69,18 @@ pub fn detect_hevy(asset: &mut dyn GuestAssetReader) -> ProbeResult<HevyArtifact
         && headers.iter().any(|header| header == "weight_kg")
     {
         ProbeResult::Match(HevyArtifact::Measurements)
+    } else if [
+        "title",
+        "start_time",
+        "end_time",
+        "exercise_title",
+        "set_index",
+        "set_type",
+    ]
+    .iter()
+    .all(|required| headers.iter().any(|header| header == required))
+    {
+        ProbeResult::Match(HevyArtifact::Workouts)
     } else {
         ProbeResult::NoMatch
     }

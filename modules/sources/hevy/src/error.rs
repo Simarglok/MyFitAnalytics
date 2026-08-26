@@ -20,6 +20,14 @@ pub enum MappingError {
     },
     #[error("weight must be positive at row {row}, got `{value}`")]
     InvalidWeight { value: String, row: usize },
+    #[error("workout session ends before it starts at row {row}")]
+    InvalidSessionTime { row: usize },
+    #[error("invalid set value `{value}` for `{column}` at row {row}")]
+    InvalidSetValue {
+        value: String,
+        column: String,
+        row: usize,
+    },
 }
 
 impl MappingError {
@@ -32,6 +40,8 @@ impl MappingError {
             Self::InvalidDate { .. } => "hevy.invalid_date",
             Self::InvalidNumber { .. } => "hevy.invalid_number",
             Self::InvalidWeight { .. } => "hevy.invalid_weight",
+            Self::InvalidSessionTime { .. } => "hevy.invalid_session_time",
+            Self::InvalidSetValue { .. } => "hevy.invalid_set_value",
         }
     }
 
