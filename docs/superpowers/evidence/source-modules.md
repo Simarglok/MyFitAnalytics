@@ -2,215 +2,232 @@
 
 ## Scope and disposition
 
-This document separates historical evidence from the fresh remediation run. The result is **Honest Draft**, not Ready: the project-local uninstall, resource, catalog, and app-signing defects were remediated and verified, but the plain Tauri app+DMG gate and the user-facing native UI lifecycle remain externally blocked. No push, PR mutation, merge, tag, release, or settings change was performed.
+This record covers the Terra High round-1 `CHANGES_REQUIRED` remediation in `/private/tmp/MyFitAnalytics-source-modules`. The implementation is **ready for Terra round 2 review**, subject to the two previously blocked external GUI gates remaining blocked by instruction. No push, PR mutation, merge, tag, release, or repository-settings change was performed.
 
-- Session title: `myfitanalytics-source-modules-remediation`
-- Durable session ID: `20260826_230635_32b707`
-- Model/effort: `gpt-5.6-luna max`
 - Repository: `https://github.com/Simarglok/MyFitAnalytics.git`
 - Worktree: `/private/tmp/MyFitAnalytics-source-modules`
 - Branch: `feat/source-modules`
 - Baseline/merge-base: `5e6f3b17c25ee52905985155e442adb028fed84a`
 - Initial verified branch/origin head: `ba019d84b9bf975cefebada9d3041a4fa3ee27cb`
-- Final implementation commit before this evidence-only commit: `e7245a7`
-- Final branch head after the evidence commit is reported by the final `git rev-parse HEAD` handoff check.
+- Implementation HEAD before this evidence commit: `7195f94`
 - Existing PR: `#4`, `main <- feat/source-modules`, Draft; intentionally preserved.
+- Terra status: round 1 was `CHANGES_REQUIRED`; this remediation is prepared for an independent round 2 review, which remains pending.
 
 ## Historical baseline (not fresh acceptance evidence)
 
-Before remediation, the recorded state at `ba019d8` reported:
+The pre-remediation record at `ba019d8` identified:
 
-- uninstall committed module state before filesystem cleanup and suppressed delete/read/sync failures;
-- packaged modules landed under `Contents/Resources/_up_/dist/modules`, while runtime lookup used `resource_dir/modules`;
-- the bundled catalog was empty in the packaged app;
-- the outer app had no sealed resource signature;
-- `cargo tauri build` failed during DMG creation;
-- native install/disable/re-enable/uninstall UI could not be completed because Accessibility permission was unavailable.
+- uninstall cleanup that could report failure after permanently deleting recoverable bytes;
+- journal recovery that trusted serialized filesystem paths;
+- wildcard resource packaging that could include stale fixture packages;
+- missing sealed outer-app resources;
+- native UI automation blocked by macOS Accessibility/Assistive Access;
+- plain full Tauri app+DMG packaging blocked in the host’s Finder AppleEvent path.
 
-The historical evidence also records a prior Terra High review as `CHANGES REQUIRED` after three rounds. That is provenance only. No new Terra review was run in this session; independent review remains pending.
+Those results are retained as provenance only. The fresh results below are from the Terra remediation commits and do not retry the external GUI gates.
 
-## Root causes and implemented solutions
+## Terra round-1 findings and fixes
 
-### 1. Atomic/restorable uninstall
+### 1. Journal-controlled paths could escape the store
 
-Root cause: uninstall mixed durable state changes with destructive package cleanup and treated critical filesystem failures as ignorable. A second installer could also observe an incomplete operation after restart without a durable recovery decision.
+Finding validated: the old recovery path parsed only `module_id`, then trusted serialized `original_root`, `staged_root`, `backup_path`, and `version_root` before calling `path_exists`, moving directories, restoring backups, or clearing state. A valid-shape journal could therefore point recovery at an external directory.
 
-Solution:
+Fix:
 
-- added a durable uninstall journal and staged package transaction;
-- moved package bytes into a recoverable staging location before applying state;
-- made read, move, delete, state-write, and directory-sync failures typed failures;
-- added rollback and startup/reopen reconstruction, including corrupt-journal error handling without panic;
-- made registry refresh occur before finalization through a transaction-aware no-recovery listing path, so no fallible registry rebuild occurs after the irreversible commit boundary;
-- preserved disable-before-uninstall and existing archive/provenance/history boundaries;
-- removed the test-only synthetic manifest hash marker and derive helper signatures from fixture bytes.
+- `UninstallTransaction::from_journal` now receives the store root before recovery filesystem inspection.
+- The module ID must be one safe path component.
+- The journal’s previous active-package snapshot must contain a valid semver version and exactly 64 hexadecimal package-hash characters.
+- Staging and backup filenames must contain valid, matching transaction UUIDs.
+- Every serialized path is compared with the recomputed store-root/module/version/hash transaction layout.
+- Existing ancestors are canonicalized and must remain under the canonical store root.
+- Symlink components at the store root or below it are rejected; only host path-prefix symlinks such as macOS `/var -> /private/var` are tolerated.
+- Recovery uses the recomputed paths, never the journal’s path values.
 
-Fresh focused failure-injection coverage is green for stage move, stage sync, package delete, post-delete read, post-read version removal, post-remove sync, backup read, backup delete, state sync, restore move, restore read, restart reconstruction, and corrupt journal recovery. The complete package lifecycle suite passed with 22 tests, and full module-host tests passed.
+Regression evidence:
 
-### 2. Tauri resource/runtime contract and catalog
+- `malicious_uninstall_journal_cannot_modify_external_sentinel`: valid-shape external-path journal is rejected; external staged sentinel remains present and byte-identical.
+- `symlinked_uninstall_journal_path_cannot_modify_external_sentinel`: store-relative path through a symlink is rejected; external sentinel remains present and byte-identical.
+- Existing corrupt-journal recovery remains non-panicking.
 
-Root cause: the resource list preserved the repository-relative source prefix in the bundle, producing `_up_/dist/modules`, while runtime looked under the stable resource root.
+### 2. Fixture packages could leak into production resources
 
-Solution:
+Finding validated: `build-module-packages.sh` previously left old `dist/modules` files in place, and the Tauri wildcard could copy a `guest-source.mfasource` produced by `--fixture-only`.
 
-- changed the Tauri resource configuration to map `../dist/modules/*.mfasource` to bundle-relative `modules/`;
-- made bootstrap resolve `resource_dir/modules` only;
-- require MyNetDiary and Hevy resources to exist and be regular files instead of silently filtering missing files;
-- run bundled resources through the same `PackageInstaller` inspection/validation path as user-selected packages;
-- verify the bundled catalog contains MyNetDiary and Hevy and preserve update/uninstall catalog behavior.
+Fix:
 
-Fresh deterministic package output and packaged-resource byte comparisons are green. The signed app contains `Contents/Resources/modules/{mynetdiary,hevy,guest-source}.mfasource`; `_up_` is absent.
+- Every package build removes and recreates `dist/modules` before writing output.
+- Tauri resources are an exact allowlist:
+  - `../dist/modules/mynetdiary.mfasource -> modules/mynetdiary.mfasource`
+  - `../dist/modules/hevy.mfasource -> modules/hevy.mfasource`
+- The package verifier asserts that production output contains exactly those two files after both deterministic builds.
+- Bootstrap still requires MyNetDiary and Hevy through the shared `PackageInstaller` path.
 
-### 3. macOS app signing and DMG packaging
+Regression evidence:
 
-Root cause: no Tauri macOS signing identity was configured, so the linker-signed executable did not produce a sealed outer app resource signature. Separately, the standard create-dmg script invokes Finder AppleEvents for visual layout; this host is not authorized for those AppleEvents.
+- `tauri_bundles_only_the_production_source_packages`: exact config assertion is green.
+- Former contamination sequence (`--fixture-only`, then production build): final package set is exactly `hevy.mfasource mynetdiary.mfasource`.
+- Release app resource assertion: exact packaged set is `['hevy.mfasource', 'mynetdiary.mfasource']`; `guest-source.mfasource` and `Contents/Resources/_up_` are absent.
 
-Solution:
+### 3. Post-commit cleanup failures could report permanent uninstall
 
-- configured `bundle.macOS.signingIdentity` as `"-"`, which makes Tauri perform an ad-hoc outer-app signing pass;
-- retained the standard Tauri/create-dmg path without weakening verification;
-- produced a separate headless diagnostic DMG with the generated script's documented `--skip-jenkins --no-internet-enable` options only for artifact validation.
+Finding validated: after `Committed` was journaled, backup deletion, store sync, and journal clear were still fallible and propagated into rollback. If the backup had already been deleted, rollback could not restore the package.
 
-The app strict-signature gate is green. The exact plain full-build gate remains blocked at DMG layout customization, not at app compilation, resource assembly, hdiutil creation, or signing.
+Fix:
 
-### 4. Production native lifecycle
+- The second durable `Committed` journal write is the explicit point of no return.
+- Failures while deleting the rollback backup, syncing the store, or clearing the journal are cleanup failures after commit and return success with the committed journal retained for deferred cleanup.
+- Committed-phase recovery never restores package bytes from a remaining backup. It removes deferred cleanup artifacts and retries journal cleanup; cleanup retry failure leaves the committed transaction for a later restart.
+- All pre-commit failures continue to return typed errors and restore package/state through rollback.
 
-The packaged executable launched under a fresh temporary HOME/profile with no debug flags, stayed alive without an immediate crash, installed the bundled MyNetDiary and Hevy package state, and exited via a normal AppleScript application quit with process exit 0.
+Regression evidence:
 
-The required native UI lifecycle could not be credibly automated. The exact macOS result was:
+- `post_backup_delete_sync_failure_keeps_committed_uninstall_for_restart_cleanup`: injected post-backup-delete sync failure returns success, leaves the committed journal, and a fresh installer removes the journal without restoring the package.
+- `journal_clear_failure_keeps_committed_uninstall_for_restart_cleanup`: injected journal-clear failure returns success, leaves the committed journal, and restart cleanup removes it without reactivating the package.
+- Existing pre-commit delete/read/move/state/sync/backup/recovery fault tests remain green.
 
-`System Events got an error: osascript is not allowed assistive access. (-1728)`
+### 4. Failure injection was scoped out of release API
 
-No retry was made. Therefore native workspace picker, package picker, live install/update/disable/re-enable/uninstall, production import, and user-facing archive/inbox lifecycle remain required-but-incomplete. The backend/native command tests and source integration tests are evidence for their scopes only and do not substitute for this UI gate.
+Fix:
 
-## Focused RED/GREEN evidence
+- Added the explicit `test-support` Cargo feature.
+- The fault enum, installer fault field/builder/check method, crate re-export, and Tauri state setter are compiled only for `test-support`, tests, or debug assertions.
+- Production release builds without `test-support` do not contain the fault field or public fault enum/re-export.
+- Normal debug integration tests retain the existing real fault-injection coverage; no test was disabled or weakened.
 
-All listed RED runs were intentionally induced before the corresponding implementation or guard; exit `101` means the focused Cargo test failed as expected. Exact diagnostics for some early probes were not retained; no diagnostic text is inferred here.
+Evidence:
 
-- `backup_read_failure_restores_staged_package_and_previous_state`: RED `101`, restored guard, GREEN `0`.
-- `backup_delete_failure_restores_package_and_previous_state`: RED `101`, restored guard, GREEN `0`.
-- `stage_move_failure_preserves_package_and_previous_state`: RED `101`, restored guard, GREEN `0`.
-- `post_stage_move_sync_failure_restores_package_and_previous_state`: RED `101`, restored guard, GREEN `0`.
-- `state_sync_failure_preserves_package_and_previous_state`: RED `101`, restored guard, GREEN `0`.
-- `recovery_restore_move_failure_keeps_the_transaction_for_a_clean_restart`: RED `101`, restored guard, GREEN `0`.
-- `recovery_restore_read_failure_keeps_the_transaction_for_a_clean_restart`: RED `101`, restored guard, GREEN `0`.
-- post-delete/read, post-read/remove, and post-remove/sync uninstall probes: RED `101`, restored boundary, GREEN `0`.
-- `corrupt_uninstall_journal_is_reported_without_panicking_during_recovery`: RED before structured parsing, GREEN `0` after error propagation.
-- `tauri_bundles_source_packages_under_the_runtime_modules_directory`: RED `101` against the old resource array, GREEN `0` after the source-to-`modules/` map.
-- `bundled_package_paths_require_mynetdiary_and_hevy`: RED `101` before the helper existed, GREEN `0` after required-resource validation.
-- native lifecycle command suite initially exposed three failures from refreshing the registry after finalization; moving refresh before finalization through a no-recovery transaction listing made the full serial suite GREEN.
-- `registry_refresh_failure_rolls_back_before_uninstall_finalization`: RED `101` before the seam consumed the injected failure, GREEN `0` after rollback-safe ordering and the `BeforeRegistryRefresh` guard.
-- strict app signing: RED `1` with `code has no resources but signature indicates they must be present`, GREEN `0` after configuring ad-hoc outer-app signing.
-- the marker scan initially found one test-helper marker; after deriving synthetic manifest hashes from fixture bytes, the committed scan is GREEN with zero matches.
+- `cargo build -p mfa-module-host --release`: **PASS, exit 0** with test-support disabled.
+- Full debug workspace tests and Tauri lifecycle tests continue to exercise all fault controls.
 
-## Fresh mandatory verification matrix
+### 5. Remaining synthetic hash sentinel
 
-Every command below was run in this remediation session. Exit codes are explicit.
+Fix:
 
-### Fixtures and deterministic packages
+- `crates/mfa-module-host/tests/support/mod.rs` now derives the dashboard fixture entrypoint hash from the fixture bytes instead of declaring a fixed dummy sentinel.
 
-- `pnpm --dir scripts/fixtures run verify` — **PASS, exit 0**; verified 7 BIFF fixtures and 2 CSV fixtures; fixture privacy scan passed.
-- `bash scripts/build-module-packages.sh` — **PASS, exit 0**.
-- `bash scripts/verify-module-packages.sh` — **PASS, exit 0**; deterministic MyNetDiary and Hevy package verification passed.
+Evidence:
+
+- Exact former dashboard hash-sentinel scan scoped to implementation/test files (excluding this evidence and governing plans): 0 matches.
+- The two broader marker matches are pre-existing prose in the governing plan documents, not implementation or test dummy values:
+  - `docs/superpowers/plans/2026-08-25-myfitanalytics-desktop-release.md:142`
+  - `docs/superpowers/plans/2026-08-25-myfitanalytics-foundation.md:444`
+
+## Local remediation commits
+
+- `9b4b49d fix: constrain uninstall journal paths`
+- `b24e58e fix: keep fixture packages out of production bundles`
+- `efead19 fix: defer committed uninstall cleanup failures`
+- `ed87c2b test: confine uninstall fault injection`
+- `7195f94 test: derive dashboard fixture hashes`
+
+Earlier related local commits remain unchanged:
+
+- `0b6324c fix: make module uninstall crash recoverable`
+- `5474fb3 fix: align bundled resources with uninstall lifecycle`
+- `54d76ed fix: seal macOS app resources with ad hoc signing`
+- `e7245a7 test: derive synthetic manifest hashes`
+- `bbf304d docs: record remediation evidence and blockers`
+
+## Fresh focused RED/GREEN evidence
+
+All focused regressions below were run from the remediation code. The earlier RED probes were intentional test-first failures; no diagnostic is invented where the old run output was not retained.
+
+- Malicious external journal sentinel: RED `101`, GREEN `0`.
+- Symlinked journal sentinel: GREEN `0` after the path-boundary guard; the test rejects the unsafe path before mutation.
+- Post-backup-delete sync restart regression: RED `101`, GREEN `0`.
+- Journal-clear restart regression: RED `101`, GREEN `0`.
+- Full package lifecycle after both fixes: `26 passed, 0 failed`, exit `0`.
+- Runtime contract support after fixture-hash correction: `5 passed, 0 failed`, exit `0`.
+- Tauri lifecycle command suite after fault-scope correction: `10 passed, 0 failed`, exit `0`.
+
+## Fresh non-GUI verification matrix
+
+All commands in this section were run after the five Terra remediation commits and before this evidence commit.
+
+### Full Rust/workspace gates
+
+- `cargo test --workspace -- --test-threads=1` — **PASS, exit 0**; all workspace unit, integration, lifecycle, source-module, storage, security, runtime, and doc-test targets passed. The relevant final output included 26 package lifecycle tests, 7 package-security tests, 5 runtime-contract tests, 10 Tauri lifecycle-command tests, 4 MyNetDiary source integration tests, and 4 Hevy/MyNetDiary source-module gate tests.
+- `cargo fmt --all --check` — **PASS, exit 0**.
+- `cargo clippy --workspace --all-targets -- -D warnings` — **PASS, exit 0**.
+- `cargo build -p mfa-module-host --release` — **PASS, exit 0**; release configuration excludes test fault support.
+
+### Fixtures and package artifacts
+
+- `pnpm --dir scripts/fixtures run verify` — **PASS, exit 0**; `verified 7 BIFF fixtures and 2 CSV fixtures; privacy scan passed`.
+- `bash scripts/verify-module-packages.sh` — **PASS, exit 0**; two clean production builds, exact-layout assertion, deterministic byte comparison, manifest/hash validation, and forbidden guest-marker checks passed.
+- `bash scripts/build-module-packages.sh` — **PASS, exit 0** during the contamination-sequence and app build.
 
 Deterministic package SHA-256 values:
 
 - MyNetDiary: `3871f17503080c308111741c0c2202ade91ef8e9e2584cc3cf2a00e7387fefa6`
 - Hevy: `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379`
 
-### Rust source, integration, and lifecycle tests
+### Frontend gates
 
-- `cargo test -p mfa-source-contract-tests` — **PASS, exit 0**; 1 test.
-- `cargo test -p mfa-source-mynetdiary` — **PASS, exit 0**; 6 tests.
-- `cargo test -p mfa-source-hevy` — **PASS, exit 0**; 5 tests.
-- `cargo test -p mfa-integration-tests --test source_modules_gate -- --test-threads=1` — **PASS, exit 0**; 4 tests.
-- `cargo test -p mfa-integration-tests --test provider_selection -- --test-threads=1` — **PASS, exit 0**; 1 test.
-- `cargo test -p myfitanalytics --test module_lifecycle_commands -- --test-threads=1` — **PASS, exit 0**; 10 tests.
-- `cargo test -p mfa-module-host` — **PASS, exit 0**; unit, capability, locale, lifecycle, security, runtime-contract, and runtime-limit suites all passed, including 22 lifecycle tests.
-- `cargo test --workspace -- --test-threads=1` — **PASS, exit 0**.
-- `cargo fmt --all --check` — **PASS, exit 0**.
-- `cargo clippy --workspace --all-targets -- -D warnings` — **PASS, exit 0**.
-
-### Frontend and root commands
-
-- `pnpm --dir web test -- --run SettingsPage` — **PASS, exit 0**; 4 files and 10 tests.
-- `pnpm --dir web test -- --run` — **PASS, exit 0**; 4 files and 10 tests.
-- `pnpm --dir web check` — **PASS, exit 0**; 0 errors and 0 warnings.
+- `pnpm --dir web test -- --run SettingsPage` — **PASS, exit 0**; 4 files, 10 tests.
+- `pnpm --dir web test -- --run` — **PASS, exit 0**; 4 files, 10 tests.
+- `pnpm --dir web check` — **PASS, exit 0**; 0 errors, 0 warnings.
 - `pnpm --dir web build` — **PASS, exit 0**.
-- `pnpm run test && pnpm run check && pnpm run build` — **PASS, exit 0**; root scripts completed all three operations.
+- `pnpm run test && pnpm run check && pnpm run build` — **PASS, exit 0**.
 
-### Tauri app, resources, signing, and DMG
+The Vite build output includes existing rolldown-vite experimental/deprecation notices; the tests, Svelte check, and builds still exit successfully.
 
-- `cargo tauri build --bundles app` after the signing configuration — **PASS, exit 0**; produced the app below and logged `Signing with identity "-"`.
-- `cargo tauri build` after resource and signing fixes — **BLOCKED, exit 1**; Rust/app compilation and app signing completed, then Tauri failed while running `bundle_dmg.sh`.
-- Default create-dmg reproduction with the generated script — **BLOCKED, exit 64**; the optional Finder AppleEvent customization returned `Finder got an error: AppleEvent timed out. (-1712)`. The standard hdiutil create/resize/attach/detach/convert stages succeed when the script is run with its headless skip option.
-- `codesign --verify --deep --strict --verbose=2 target/release/bundle/macos/MyFitAnalytics.app` — **PASS, exit 0**; valid on disk and satisfies its designated requirement.
-- Tauri bundle inspection — **PASS, exit 0**; `Contents/Resources/modules` contains `guest-source.mfasource`, `hevy.mfasource`, and `mynetdiary.mfasource`; no `Contents/Resources/_up_` path.
-- pre/post package comparison using `cmp` for both packages — **PASS, exit 0**; bundled bytes are identical to `dist/modules` bytes.
-- headless generated diagnostic command `bash target/release/bundle/dmg/bundle_dmg.sh --skip-jenkins --no-internet-enable target/release/bundle/dmg/MyFitAnalytics_0.1.0_aarch64.dmg target/release/bundle/macos/MyFitAnalytics.app` — **PASS, exit 0** as diagnostic artifact production only, not the plain Tauri DMG gate.
-- `hdiutil verify` plus read-only attach, module-layout assertion, and detach — **PASS, exit 0** for the diagnostic DMG; checksum is valid and all three packaged module files are present.
+### Tauri app/resources/signing
 
-Absolute diagnostic artifacts:
+- `cargo tauri build --bundles app` — **PASS, exit 0**; production package build ran first, then the app was built and ad-hoc signed with identity `"-"`.
+- `codesign --verify --deep --strict --verbose=2 target/release/bundle/macos/MyFitAnalytics.app` — **PASS, exit 0**; valid on disk and satisfies its Designated Requirement.
+- Exact app resource assertion — **PASS, exit 0**; `Contents/Resources/modules` contains only `hevy.mfasource` and `mynetdiary.mfasource`, with no guest package and no `_up_` directory.
+- Resource `cmp` assertion — **PASS, exit 0**; packaged MyNetDiary and Hevy bytes match `dist/modules` exactly.
 
-- App: `/private/tmp/MyFitAnalytics-source-modules/target/release/bundle/macos/MyFitAnalytics.app`
-- DMG: `/private/tmp/MyFitAnalytics-source-modules/target/release/bundle/dmg/MyFitAnalytics_0.1.0_aarch64.dmg`
+Fresh final artifact hashes:
 
-SHA-256 values from the final artifact validation:
+- App executable `Contents/MacOS/myfitanalytics`: `3ebde9b84ef3075d9f1521c6cb5bf1cfcdc2ccc79371299c097c3123e13e0c19`
+- Packaged MyNetDiary: `3871f17503080c308111741c0c2202ade91ef8e9e2584cc3cf2a00e7387fefa6`
+- Packaged Hevy: `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379`
 
-- app executable `Contents/MacOS/myfitanalytics`: `6aaa71e5bbfb6c8edd50fd2f6a499ebd8a055cff858294889e348db91f30a395`
-- app MyNetDiary package: `3871f17503080c308111741c0c2202ade91ef8e9e2584cc3cf2a00e7387fefa6`
-- app Hevy package: `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379`
-- diagnostic DMG: `76344fa9e91f74adff3cb25d57fb3de6ae8474b1abda223c940da37abdc7f9f6`
+### Privacy, marker, and Git checks
 
-The package hashes before resource bundling and after extraction from the signed app match exactly. The diagnostic DMG is not represented as a pass for the mandatory plain `cargo tauri build` gate.
+- Tracked files scanned: `232`.
+- Exact former dashboard hash-sentinel scan scoped to implementation/test files: **0 matches**.
+- Broader marker scan: **2 pre-existing plan-document prose matches**, listed above; no implementation/test marker matches.
+- Private-key/API-token pattern scan: **0 matches**.
+- Credential-like tracked filenames: **0 matches**.
+- `git diff --check`: **PASS, exit 0**.
+- Initial remediation-session `git fetch origin --prune`: **PASS, exit 0**; canonical origin and remote branch provenance were unchanged.
 
-### Isolated production launch and native UI authority
+No real exports, credentials, profiles, `.env` files, or derived personal data were opened or added. Only checked-in synthetic fixtures and isolated temporary test roots were used.
 
-- Fresh packaged executable launch with isolated temporary HOME/profile — **PASS, exit 0** for process startup; process remained alive without immediate crash.
-- Fresh-profile backend state inspection — **PASS, exit 0**; active bundled module IDs were `hevy` and `mynetdiary`.
-- `System Events` window/accessibility inspection — **BLOCKED, exit 1**; macOS returned `osascript is not allowed assistive access (-1728)`.
-- normal `tell application "myfitanalytics" to quit` — **PASS, exit 0**.
-- isolated process post-quit check — **PASS, exit 0**; process exited normally.
-- Full user-facing native lifecycle — **REQUIRED BUT INCOMPLETE** because Accessibility/Screen Recording authority was unavailable. No picker, live lifecycle, or production UI import claim is made.
+## External gates intentionally not retried
 
-### Marker, privacy, and Git checks
+These are not claimed as fresh PASS results.
 
-- committed changed-file forbidden-marker scan — **PASS, exit 0**; 0 matches.
-- full tracked-index privacy scan — **PASS, exit 0**; 232 tracked files, 0 suspicious secret filenames, 0 secret-token matches.
-- added-diff privacy-pattern scan — **REVIEWED**; matches were policy wording about exports/credentials, not credentials or data.
-- `git diff --check 5e6f3b17c25ee52905985155e442adb028fed84a...HEAD` — **PASS, exit 0**.
-- `git fetch origin --prune` and provenance checks — **PASS, exit 0**; canonical origin unchanged and `origin/feat/source-modules` remained `ba019d84b9bf975cefebada9d3041a4fa3ee27cb`.
-- No real exports, credentials, profiles, `.env` files, or derived personal data were opened or added. Only checked-in synthetic fixtures were used.
+1. **Plain `cargo tauri build` app+DMG gate:** prior verified result was exit `1` during the Tauri DMG bundling path. It was not retried in this remediation because the external Finder/AppleEvent packaging gate was already blocked and the user explicitly prohibited retrying it. The app-only build, signing, resource exactness, and non-GUI artifact checks above are separate evidence.
+2. **Native UI lifecycle gate:** prior exact macOS error was `System Events got an error: osascript is not allowed assistive access. (-1728)`. It was not retried. The packaged executable launch/quit smoke result does not substitute for picker-driven install/update/disable/re-enable/uninstall/import UI evidence.
 
 ## Implemented
 
-- Durable, rollback-safe, restart-reconstructable uninstall with real filesystem failure injection and regression coverage.
-- Stable `Contents/Resources/modules` Tauri resource contract and required MyNetDiary/Hevy bundled catalog.
-- Shared PackageInstaller validation for bundled and user-selected package paths.
-- Ad-hoc outer-app signing with strict sealed-resource verification.
-- Deterministic package, resource, integration, Rust, frontend, and native-command verification.
-- Fresh isolated packaged launch and normal application quit evidence.
-- This evidence document, committed separately after the verification run.
+- Canonical, symlink-rejecting uninstall journal reconstruction.
+- Durable staged uninstall with pre-commit rollback and post-commit deferred cleanup.
+- Restart-safe committed cleanup semantics and fault coverage.
+- Clean production package staging and exact MyNetDiary/Hevy resource allowlist.
+- Shared PackageInstaller validation and deterministic package/hash verification.
+- Release-scoped test fault injection.
+- Fixture-derived synthetic manifest hashes with no former fixed sentinel.
+- Fresh full Rust, frontend, package, signing, resource, privacy, and non-GUI app verification.
 
-## Not implemented / required but incomplete
+## Not implemented / still blocked
 
-- The mandatory plain `cargo tauri build` app+DMG gate is not green because the host blocks Finder AppleEvents during create-dmg customization. The headless diagnostic DMG is explicitly not substituted for that gate.
-- The mandatory user-facing native UI lifecycle is not green because macOS Accessibility/Screen Recording authority is unavailable. No unsafe bypass, debug protocol, or filesystem backdoor was added.
-- A new independent Terra High review is pending; the historical CHANGES REQUIRED result must not be treated as approval.
-- Push and PR update were not performed by instruction; PR #4 remains Draft.
+- The plain full Tauri app+DMG gate remains externally blocked and was intentionally not retried.
+- The native user-facing UI lifecycle remains externally blocked by missing macOS Accessibility/Assistive Access authority and was intentionally not retried.
+- Independent Terra High round-2 review is pending.
+- Remote push, PR update, merge, and all other GitHub mutations were not performed.
 
 ## Remaining work
 
-1. Run the plain `cargo tauri build` in an interactive macOS session with the required Finder AppleEvent/Accessibility authority, or otherwise provide an approved external headless packaging authority, and retain the mandatory command as the gate.
-2. Grant the required macOS Accessibility/Screen Recording permissions in the authorized test session and run the real native picker/install/update/disable/re-enable/uninstall/import lifecycle with synthetic data.
-3. Obtain the independent read-only Terra High review, address any findings with follow-up commits, then let the manager perform any separately authorized remote handoff.
+1. Terra performs the independent round-2 review against this HEAD/evidence.
+2. If Terra finds no further issues, the separately authorized remote handoff can be performed by the manager; this session did not push or mutate PR #4.
+3. If external authority becomes available in a future authorized session, run the two blocked GUI gates; no product workaround is indicated by this remediation.
 
-## Local commits and cleanliness
+## Local cleanliness and handoff
 
-- `0b6324c fix: make module uninstall crash recoverable`
-- `5474fb3 fix: align bundled resources with uninstall lifecycle`
-- `54d76ed fix: seal macOS app resources with ad hoc signing`
-- `e7245a7 test: derive synthetic manifest hashes`
-- Evidence-only follow-up commit: the commit containing this file, verified immediately after writing.
-
-The final handoff reports the exact post-evidence `HEAD`, branch status, and confirms no push or PR mutation.
+The implementation commits are complete and the evidence update is the only remaining local documentation commit at handoff. Final exact `HEAD`, ahead count, and clean-worktree status must be taken from the post-evidence `git status`/`git rev-parse` output rather than inferred from this file.
