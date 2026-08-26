@@ -9,10 +9,12 @@ use mfa_ingestion::{
     IngestionCoordinator, IngestionDependencies, IngestionError, RecoveryGate, ScanReason,
     now_request, recover_sources,
 };
+#[cfg(any(test, debug_assertions))]
+use mfa_module_host::UninstallFinalizationFault;
 use mfa_module_host::{
     CapabilityError, CapabilityRegistry, ComponentRuntime, InstalledModule, LocaleError,
     LocaleResolver, ModuleRegistry, PackageError, PackageInstaller, ProviderResolution,
-    RuntimeLimits, UninstallFinalizationFault,
+    RuntimeLimits,
 };
 use semver::Version;
 use std::collections::BTreeMap;
@@ -81,6 +83,7 @@ pub struct AppState {
     bundled_packages: Mutex<BTreeMap<ModuleId, PathBuf>>,
     storage: Mutex<Option<StorageRuntime>>,
     event_sink: Mutex<Option<Arc<dyn DataChangedSink>>>,
+    #[cfg(any(test, debug_assertions))]
     uninstall_finalization_fault: Mutex<Option<UninstallFinalizationFault>>,
 }
 
@@ -118,6 +121,7 @@ impl AppState {
             bundled_packages: Mutex::new(BTreeMap::new()),
             storage: Mutex::new(None),
             event_sink: Mutex::new(None),
+            #[cfg(any(test, debug_assertions))]
             uninstall_finalization_fault: Mutex::new(None),
         })
     }
@@ -161,6 +165,7 @@ impl AppState {
             bundled_packages: Mutex::new(BTreeMap::new()),
             storage: Mutex::new(None),
             event_sink: Mutex::new(None),
+            #[cfg(any(test, debug_assertions))]
             uninstall_finalization_fault: Mutex::new(None),
         })
     }
@@ -180,6 +185,7 @@ impl AppState {
         Ok(())
     }
 
+    #[cfg(any(test, debug_assertions))]
     pub fn set_uninstall_finalization_fault(&self, fault: Option<UninstallFinalizationFault>) {
         if let Ok(mut configured_fault) = self.uninstall_finalization_fault.lock() {
             *configured_fault = fault;
@@ -192,13 +198,16 @@ impl AppState {
 
     pub(crate) fn uninstall_package_installer(&self) -> PackageInstaller {
         let installer = self.package_installer();
-        self.uninstall_finalization_fault
+        #[cfg(any(test, debug_assertions))]
+        if let Some(fault) = self
+            .uninstall_finalization_fault
             .lock()
             .ok()
             .and_then(|mut fault| fault.take())
-            .map_or(installer.clone(), |fault| {
-                installer.with_uninstall_finalization_fault(fault)
-            })
+        {
+            return installer.with_uninstall_finalization_fault(fault);
+        }
+        installer
     }
 
     pub(crate) async fn install_package(

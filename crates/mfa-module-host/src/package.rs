@@ -25,6 +25,21 @@ const DEFAULT_MAX_UNCOMPRESSED_BYTES: u64 = 67_108_864;
 const ENTRYPOINT_NAME: &str = "module.wasm";
 const HOST_API_RANGE: &str = ">=1.0.0, <2.0.0";
 
+#[cfg(any(test, debug_assertions, feature = "test-support"))]
+macro_rules! uninstall_fault {
+    ($installer:expr, $point:expr) => {
+        $installer.check_uninstall_fault($point)
+    };
+}
+
+#[cfg(not(any(test, debug_assertions, feature = "test-support")))]
+macro_rules! uninstall_fault {
+    ($installer:expr, $point:expr) => {{
+        let _ = &$installer;
+        Ok::<(), PackageError>(())
+    }};
+}
+
 const SOURCE_SCHEMA: &str =
     include_str!("../../../modules/sdk/schemas/source-manifest.schema.json");
 const DASHBOARD_SCHEMA: &str =
@@ -82,6 +97,7 @@ pub struct UninstallTransaction {
     state_applied: bool,
 }
 
+#[cfg(any(test, debug_assertions, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UninstallFinalizationFault {
     BeforeDelete,
@@ -351,6 +367,7 @@ pub struct PackageInstaller {
     max_uncompressed_bytes: u64,
     host_api_range: VersionReq,
     current_app_version: Version,
+    #[cfg(any(test, debug_assertions, feature = "test-support"))]
     uninstall_finalization_fault: Option<UninstallFinalizationFault>,
 }
 
@@ -368,6 +385,7 @@ impl PackageInstaller {
             max_uncompressed_bytes: DEFAULT_MAX_UNCOMPRESSED_BYTES,
             host_api_range: VersionReq::parse(HOST_API_RANGE).expect("static host API range"),
             current_app_version,
+            #[cfg(any(test, debug_assertions, feature = "test-support"))]
             uninstall_finalization_fault: None,
         }
     }
@@ -377,6 +395,7 @@ impl PackageInstaller {
         self
     }
 
+    #[cfg(any(test, debug_assertions, feature = "test-support"))]
     pub fn with_uninstall_finalization_fault(mut self, fault: UninstallFinalizationFault) -> Self {
         self.uninstall_finalization_fault = Some(fault);
         self
@@ -592,7 +611,7 @@ impl PackageInstaller {
     }
 
     pub fn list_without_recovery(&self) -> Result<Vec<InstalledModule>, PackageError> {
-        self.check_uninstall_fault(UninstallFinalizationFault::BeforeRegistryRefresh)?;
+        uninstall_fault!(self, UninstallFinalizationFault::BeforeRegistryRefresh)?;
         self.current_registry_without_recovery()
     }
 
@@ -668,14 +687,14 @@ impl PackageInstaller {
         save_uninstall_journal(&self.store_root, &transaction.journal())?;
 
         let result = (|| {
-            self.check_uninstall_fault(UninstallFinalizationFault::BeforeStageMove)?;
+            uninstall_fault!(self, UninstallFinalizationFault::BeforeStageMove)?;
             fs::rename(&transaction.original_root, &transaction.staged_root).map_err(|error| {
                 PackageError::AtomicUninstall {
                     detail: format!("move package into uninstall staging failed: {error}"),
                 }
             })?;
             transaction.phase = UninstallPhase::Moved;
-            self.check_uninstall_fault(UninstallFinalizationFault::AfterStageMoveBeforeSync)?;
+            uninstall_fault!(self, UninstallFinalizationFault::AfterStageMoveBeforeSync)?;
             sync_directory(&transaction.version_root).map_err(|error| {
                 PackageError::AtomicUninstall {
                     detail: format!("sync uninstall staging directory failed: {error}"),
@@ -711,7 +730,7 @@ impl PackageInstaller {
         state
             .uninstalled_modules
             .insert(transaction.module_id.to_string());
-        self.check_uninstall_fault(UninstallFinalizationFault::BeforeStateSync)?;
+        uninstall_fault!(self, UninstallFinalizationFault::BeforeStateSync)?;
         save_state(&self.store_root, &state)?;
         transaction.state_applied = true;
         transaction.phase = UninstallPhase::StateApplied;
@@ -754,13 +773,13 @@ impl PackageInstaller {
                 detail: "cannot finalize an unapplied uninstall".to_owned(),
             });
         }
-        self.check_uninstall_fault(UninstallFinalizationFault::BeforeDelete)?;
+        uninstall_fault!(self, UninstallFinalizationFault::BeforeDelete)?;
         fs::remove_dir_all(&transaction.staged_root).map_err(|error| {
             PackageError::AtomicUninstall {
                 detail: format!("remove staged package failed: {error}"),
             }
         })?;
-        self.check_uninstall_fault(UninstallFinalizationFault::AfterDeleteBeforeRead)?;
+        uninstall_fault!(self, UninstallFinalizationFault::AfterDeleteBeforeRead)?;
         sync_directory(&transaction.version_root).map_err(|error| {
             PackageError::AtomicUninstall {
                 detail: format!("sync package version directory failed: {error}"),
@@ -780,7 +799,10 @@ impl PackageInstaller {
                 detail: format!("read package version directory entry failed: {error}"),
             })?
             .is_none();
-        self.check_uninstall_fault(UninstallFinalizationFault::AfterReadBeforeRemoveVersion)?;
+        uninstall_fault!(
+            self,
+            UninstallFinalizationFault::AfterReadBeforeRemoveVersion
+        )?;
         if version_root_is_empty {
             fs::remove_dir(&transaction.version_root).map_err(|error| {
                 PackageError::AtomicUninstall {
@@ -788,7 +810,7 @@ impl PackageInstaller {
                 }
             })?;
         }
-        self.check_uninstall_fault(UninstallFinalizationFault::AfterRemoveBeforeSync)?;
+        uninstall_fault!(self, UninstallFinalizationFault::AfterRemoveBeforeSync)?;
         if let Some(parent) = transaction.version_root.parent() {
             sync_directory(parent).map_err(|error| PackageError::AtomicUninstall {
                 detail: format!("sync package module directory failed: {error}"),
@@ -798,23 +820,22 @@ impl PackageInstaller {
         save_uninstall_journal(&self.store_root, &transaction.journal())?;
         transaction.phase = UninstallPhase::Committed;
         save_uninstall_journal(&self.store_root, &transaction.journal())?;
-        self.check_uninstall_fault(UninstallFinalizationFault::BeforeBackupDelete)?;
+        uninstall_fault!(self, UninstallFinalizationFault::BeforeBackupDelete)?;
         if fs::remove_file(&transaction.backup_path).is_err() {
             return Ok(());
         }
-        if self
-            .check_uninstall_fault(UninstallFinalizationFault::AfterBackupDeleteBeforeSync)
-            .is_err()
+        if uninstall_fault!(
+            self,
+            UninstallFinalizationFault::AfterBackupDeleteBeforeSync
+        )
+        .is_err()
         {
             return Ok(());
         }
         if sync_directory(&self.store_root).is_err() {
             return Ok(());
         }
-        if self
-            .check_uninstall_fault(UninstallFinalizationFault::BeforeJournalClear)
-            .is_err()
-        {
+        if uninstall_fault!(self, UninstallFinalizationFault::BeforeJournalClear).is_err() {
             return Ok(());
         }
         if clear_uninstall_journal(&self.store_root).is_err() {
@@ -836,6 +857,7 @@ impl PackageInstaller {
         }
     }
 
+    #[cfg(any(test, debug_assertions, feature = "test-support"))]
     fn check_uninstall_fault(&self, point: UninstallFinalizationFault) -> Result<(), PackageError> {
         if self.uninstall_finalization_fault == Some(point) {
             return Err(PackageError::AtomicUninstall {
@@ -898,7 +920,7 @@ impl PackageInstaller {
         collect_package_files(source, Path::new(""), &mut files)?;
         files.sort_by(|left, right| left.0.cmp(&right.0));
         for (relative, path) in files {
-            self.check_uninstall_fault(UninstallFinalizationFault::BeforeBackupRead)?;
+            uninstall_fault!(self, UninstallFinalizationFault::BeforeBackupRead)?;
             let bytes = fs::read(&path).map_err(|error| PackageError::AtomicUninstall {
                 detail: format!("read package for uninstall rollback backup failed: {error}"),
             })?;
@@ -950,7 +972,7 @@ impl PackageInstaller {
                     }
                 })?;
             }
-            self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreMove)?;
+            uninstall_fault!(self, UninstallFinalizationFault::BeforeRestoreMove)?;
             fs::rename(&transaction.staged_root, &transaction.original_root).map_err(|error| {
                 PackageError::AtomicUninstall {
                     detail: format!("move staged package back during rollback failed: {error}"),
@@ -994,7 +1016,7 @@ impl PackageInstaller {
     }
 
     fn restore_from_backup(&self, transaction: &UninstallTransaction) -> Result<(), PackageError> {
-        self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreRead)?;
+        uninstall_fault!(self, UninstallFinalizationFault::BeforeRestoreRead)?;
         let bytes =
             fs::read(&transaction.backup_path).map_err(|error| PackageError::AtomicUninstall {
                 detail: format!("read uninstall rollback backup failed: {error}"),
@@ -1079,7 +1101,7 @@ impl PackageInstaller {
                     }
                 })?;
             }
-            self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreMove)?;
+            uninstall_fault!(self, UninstallFinalizationFault::BeforeRestoreMove)?;
             fs::rename(&restore_root, &transaction.original_root).map_err(|error| {
                 PackageError::AtomicUninstall {
                     detail: format!("move restored package into place failed: {error}"),
