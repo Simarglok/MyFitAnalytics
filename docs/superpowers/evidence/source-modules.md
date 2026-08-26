@@ -9,7 +9,7 @@ This record covers the Terra High round-1 and round-2 `CHANGES_REQUIRED` remedia
 - Branch: `feat/source-modules`
 - Baseline/merge-base: `5e6f3b17c25ee52905985155e442adb028fed84a`
 - Initial verified branch/origin head: `ba019d84b9bf975cefebada9d3041a4fa3ee27cb`
-- Implementation HEAD before this evidence commit: `9c8b8ea`
+- Implementation HEAD before this evidence commit: `42cc3d2`
 - Existing PR: `#4`, `main <- feat/source-modules`, Draft; intentionally preserved.
 - Terra status: rounds 1 and 2 were `CHANGES_REQUIRED`; Terra round 3 approval was followed by manager discovery that the exact Tauri integration command failed at `7555b58`; the final correction is prepared for manager re-verification.
 
@@ -124,6 +124,7 @@ Evidence:
 - `7195f94 test: derive dashboard fixture hashes`
 - `f2e4116 fix: gate fault injection behind test feature`
 - `9c8b8ea test: enable fault support for integration targets`
+- `42cc3d2 chore: lock test-only feature dependencies`
 
 Earlier related local commits remain unchanged:
 
