@@ -1,6 +1,8 @@
 use crate::error::PackageError;
 use crate::store::{
-    ActivePackage, BundledCatalogEntry, ModuleState, load_state, save_state, sync_directory,
+    ActivePackage, BundledCatalogEntry, ModuleState, UninstallJournal, UninstallPhase,
+    clear_uninstall_journal, load_state, load_uninstall_journal, save_state,
+    save_uninstall_journal, sync_directory,
 };
 use jsonschema::validator_for;
 use mfa_contracts::{
@@ -15,7 +17,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
+use zip::CompressionMethod;
 use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
 
 const DEFAULT_MAX_UNCOMPRESSED_BYTES: u64 = 67_108_864;
 const ENTRYPOINT_NAME: &str = "module.wasm";
@@ -71,14 +75,63 @@ pub struct UninstallTransaction {
     module_id: ModuleId,
     original_root: PathBuf,
     staged_root: PathBuf,
+    backup_path: PathBuf,
     version_root: PathBuf,
     previous_state: ModuleState,
+    phase: UninstallPhase,
     state_applied: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UninstallFinalizationFault {
     BeforeDelete,
+    AfterDeleteBeforeRead,
+    AfterReadBeforeRemoveVersion,
+    AfterRemoveBeforeSync,
+    BeforeBackupDelete,
+    BeforeRestoreMove,
+    BeforeRestoreRead,
+    BeforeStateSync,
+    BeforeStageMove,
+    AfterStageMoveBeforeSync,
+    BeforeBackupRead,
+}
+
+impl UninstallTransaction {
+    fn journal(&self) -> UninstallJournal {
+        UninstallJournal {
+            module_id: self.module_id.to_string(),
+            original_root: self.original_root.clone(),
+            staged_root: self.staged_root.clone(),
+            backup_path: self.backup_path.clone(),
+            version_root: self.version_root.clone(),
+            previous_state: self.previous_state.clone(),
+            phase: self.phase,
+        }
+    }
+
+    fn from_journal(journal: &UninstallJournal) -> Result<Self, PackageError> {
+        let module_id = ModuleId::try_from(journal.module_id.as_str()).map_err(|error| {
+            PackageError::StateInvalid {
+                detail: format!("uninstall journal contains an invalid module id: {error}"),
+            }
+        })?;
+        Ok(Self {
+            module_id,
+            original_root: journal.original_root.clone(),
+            staged_root: journal.staged_root.clone(),
+            backup_path: journal.backup_path.clone(),
+            version_root: journal.version_root.clone(),
+            previous_state: journal.previous_state.clone(),
+            phase: journal.phase,
+            state_applied: matches!(
+                journal.phase,
+                UninstallPhase::StateApplied
+                    | UninstallPhase::PackageRemoved
+                    | UninstallPhase::Committed
+            ),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +176,7 @@ impl PackageInstaller {
     }
 
     pub fn inspect(&self, package: &Path) -> Result<InspectedPackage, PackageError> {
+        self.recover_pending_uninstall()?;
         let bytes = fs::read(package).map_err(PackageError::from)?;
         let package_hash = digest(&bytes);
         detect_duplicate_archive_entries(&bytes)?;
@@ -252,6 +306,7 @@ impl PackageInstaller {
         &self,
         packages: &[PathBuf],
     ) -> Result<Vec<BundledPackageInfo>, PackageError> {
+        self.recover_pending_uninstall()?;
         let inspected = packages
             .iter()
             .map(|package| self.inspect(package).map(|value| (package, value)))
@@ -286,6 +341,7 @@ impl PackageInstaller {
     }
 
     pub fn bundled_catalog(&self) -> Result<Vec<BundledPackageInfo>, PackageError> {
+        self.recover_pending_uninstall()?;
         let state = load_state(&self.store_root)?;
         state
             .bundled_catalog
@@ -325,6 +381,7 @@ impl PackageInstaller {
     }
 
     pub fn set_enabled(&self, id: &ModuleId, enabled: bool) -> Result<(), PackageError> {
+        self.recover_pending_uninstall()?;
         let module = self
             .current_registry()?
             .into_iter()
@@ -352,21 +409,16 @@ impl PackageInstaller {
     pub fn uninstall(&self, id: &ModuleId) -> Result<(), PackageError> {
         let mut transaction = self.stage_uninstall(id)?;
         if let Err(error) = self.apply_uninstall(&mut transaction) {
-            let _ = self.rollback_uninstall(&mut transaction);
-            return Err(error);
+            return self.return_after_rollback(error, &mut transaction);
         }
         if let Err(error) = self.finalize_uninstall(&mut transaction) {
-            return match self.rollback_uninstall(&mut transaction) {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(PackageError::AtomicUninstall {
-                    detail: format!("{error}; rollback failed: {rollback}"),
-                }),
-            };
+            return self.return_after_rollback(error, &mut transaction);
         }
         Ok(())
     }
 
     pub fn stage_uninstall(&self, id: &ModuleId) -> Result<UninstallTransaction, PackageError> {
+        self.recover_pending_uninstall()?;
         let selected = self
             .current_registry()?
             .into_iter()
@@ -381,27 +433,60 @@ impl PackageInstaller {
                 detail: "installed module has no version parent".to_owned(),
             })?
             .to_path_buf();
-        let staged_root = version_root.join(format!(".uninstall-staging-{}", Uuid::new_v4()));
+        let transaction_id = Uuid::new_v4();
+        let staged_root = version_root.join(format!(".uninstall-staging-{transaction_id}"));
+        let backup_path = self
+            .store_root
+            .join(format!(".uninstall-backup-{transaction_id}.zip"));
         let previous_state = load_state(&self.store_root)?;
-        fs::rename(&original_root, &staged_root).map_err(PackageError::from)?;
-        if let Err(error) = sync_directory(&version_root) {
-            let _ = fs::rename(&staged_root, &original_root);
-            return Err(error);
-        }
-        Ok(UninstallTransaction {
+        let mut transaction = UninstallTransaction {
             module_id: id.clone(),
             original_root,
             staged_root,
+            backup_path,
             version_root,
             previous_state,
+            phase: UninstallPhase::Prepared,
             state_applied: false,
-        })
+        };
+        save_uninstall_journal(&self.store_root, &transaction.journal())?;
+
+        let result = (|| {
+            self.check_uninstall_fault(UninstallFinalizationFault::BeforeStageMove)?;
+            fs::rename(&transaction.original_root, &transaction.staged_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("move package into uninstall staging failed: {error}"),
+                }
+            })?;
+            transaction.phase = UninstallPhase::Moved;
+            self.check_uninstall_fault(UninstallFinalizationFault::AfterStageMoveBeforeSync)?;
+            sync_directory(&transaction.version_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("sync uninstall staging directory failed: {error}"),
+                }
+            })?;
+            save_uninstall_journal(&self.store_root, &transaction.journal())?;
+            self.backup_package(&transaction.staged_root, &transaction.backup_path)?;
+            transaction.phase = UninstallPhase::BackedUp;
+            save_uninstall_journal(&self.store_root, &transaction.journal())?;
+            Ok::<(), PackageError>(())
+        })();
+        if let Err(error) = result {
+            return self.return_after_rollback(error, &mut transaction);
+        }
+        Ok(transaction)
     }
 
     pub fn apply_uninstall(
         &self,
         transaction: &mut UninstallTransaction,
     ) -> Result<(), PackageError> {
+        if transaction.phase != UninstallPhase::BackedUp {
+            return Err(PackageError::AtomicUninstall {
+                detail: "cannot apply an uninstall before its rollback backup is durable"
+                    .to_owned(),
+            });
+        }
         let mut state = transaction.previous_state.clone();
         state
             .modules
@@ -410,8 +495,11 @@ impl PackageInstaller {
         state
             .uninstalled_modules
             .insert(transaction.module_id.to_string());
+        self.check_uninstall_fault(UninstallFinalizationFault::BeforeStateSync)?;
         save_state(&self.store_root, &state)?;
         transaction.state_applied = true;
+        transaction.phase = UninstallPhase::StateApplied;
+        save_uninstall_journal(&self.store_root, &transaction.journal())?;
         Ok(())
     }
 
@@ -419,15 +507,25 @@ impl PackageInstaller {
         &self,
         transaction: &mut UninstallTransaction,
     ) -> Result<(), PackageError> {
-        if transaction.state_applied {
-            save_state(&self.store_root, &transaction.previous_state)?;
-            transaction.state_applied = false;
+        let backup_exists = path_exists(&transaction.backup_path)?;
+        let staged_exists = path_exists(&transaction.staged_root)?;
+        let original_exists = path_exists(&transaction.original_root)?;
+        if transaction.phase == UninstallPhase::Committed
+            && !backup_exists
+            && !staged_exists
+            && !original_exists
+        {
+            return Err(PackageError::AtomicUninstall {
+                detail:
+                    "cannot roll back a committed uninstall after its rollback backup was removed"
+                        .to_owned(),
+            });
         }
-        if transaction.staged_root.exists() {
-            fs::rename(&transaction.staged_root, &transaction.original_root)
-                .map_err(PackageError::from)?;
-            sync_directory(&transaction.version_root)?;
-        }
+        self.restore_transaction_files(transaction)?;
+        save_state(&self.store_root, &transaction.previous_state)?;
+        transaction.state_applied = false;
+        transaction.phase = UninstallPhase::BackedUp;
+        clear_uninstall_journal(&self.store_root)?;
         Ok(())
     }
 
@@ -435,27 +533,334 @@ impl PackageInstaller {
         &self,
         transaction: &mut UninstallTransaction,
     ) -> Result<(), PackageError> {
-        if !transaction.state_applied {
+        if !transaction.state_applied || transaction.phase != UninstallPhase::StateApplied {
             return Err(PackageError::AtomicUninstall {
                 detail: "cannot finalize an unapplied uninstall".to_owned(),
             });
         }
-        if self.uninstall_finalization_fault == Some(UninstallFinalizationFault::BeforeDelete) {
+        self.check_uninstall_fault(UninstallFinalizationFault::BeforeDelete)?;
+        fs::remove_dir_all(&transaction.staged_root).map_err(|error| {
+            PackageError::AtomicUninstall {
+                detail: format!("remove staged package failed: {error}"),
+            }
+        })?;
+        self.check_uninstall_fault(UninstallFinalizationFault::AfterDeleteBeforeRead)?;
+        sync_directory(&transaction.version_root).map_err(|error| {
+            PackageError::AtomicUninstall {
+                detail: format!("sync package version directory failed: {error}"),
+            }
+        })?;
+        let mut entries =
+            transaction
+                .version_root
+                .read_dir()
+                .map_err(|error| PackageError::AtomicUninstall {
+                    detail: format!("read package version directory failed: {error}"),
+                })?;
+        let version_root_is_empty = entries
+            .next()
+            .transpose()
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("read package version directory entry failed: {error}"),
+            })?
+            .is_none();
+        self.check_uninstall_fault(UninstallFinalizationFault::AfterReadBeforeRemoveVersion)?;
+        if version_root_is_empty {
+            fs::remove_dir(&transaction.version_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("remove empty package version directory failed: {error}"),
+                }
+            })?;
+        }
+        self.check_uninstall_fault(UninstallFinalizationFault::AfterRemoveBeforeSync)?;
+        if let Some(parent) = transaction.version_root.parent() {
+            sync_directory(parent).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("sync package module directory failed: {error}"),
+            })?;
+        }
+        transaction.phase = UninstallPhase::PackageRemoved;
+        save_uninstall_journal(&self.store_root, &transaction.journal())?;
+        transaction.phase = UninstallPhase::Committed;
+        save_uninstall_journal(&self.store_root, &transaction.journal())?;
+        self.check_uninstall_fault(UninstallFinalizationFault::BeforeBackupDelete)?;
+        fs::remove_file(&transaction.backup_path).map_err(|error| {
+            PackageError::AtomicUninstall {
+                detail: format!("remove uninstall rollback backup failed: {error}"),
+            }
+        })?;
+        sync_directory(&self.store_root).map_err(|error| PackageError::AtomicUninstall {
+            detail: format!("sync module store after uninstall failed: {error}"),
+        })?;
+        clear_uninstall_journal(&self.store_root)?;
+        Ok(())
+    }
+
+    fn return_after_rollback<T>(
+        &self,
+        error: PackageError,
+        transaction: &mut UninstallTransaction,
+    ) -> Result<T, PackageError> {
+        match self.rollback_uninstall(transaction) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(PackageError::AtomicUninstall {
+                detail: format!("{error}; rollback failed: {rollback}"),
+            }),
+        }
+    }
+
+    fn check_uninstall_fault(&self, point: UninstallFinalizationFault) -> Result<(), PackageError> {
+        if self.uninstall_finalization_fault == Some(point) {
             return Err(PackageError::AtomicUninstall {
-                detail: "injected finalization failure before package deletion".to_owned(),
+                detail: format!("injected uninstall failure at {point:?}"),
             });
         }
-        let _ = fs::remove_dir_all(&transaction.staged_root);
-        let version_root_is_empty = transaction
-            .version_root
-            .read_dir()
-            .map(|mut entries| entries.next().is_none())
-            .unwrap_or(false);
-        if version_root_is_empty {
-            let _ = fs::remove_dir(&transaction.version_root);
+        Ok(())
+    }
+
+    fn recover_pending_uninstall(&self) -> Result<(), PackageError> {
+        let Some(journal) = load_uninstall_journal(&self.store_root)? else {
+            return Ok(());
+        };
+        let transaction = UninstallTransaction::from_journal(&journal)?;
+        let backup_exists = path_exists(&transaction.backup_path)?;
+        let staged_exists = path_exists(&transaction.staged_root)?;
+        let original_exists = path_exists(&transaction.original_root)?;
+        if transaction.phase == UninstallPhase::Committed
+            && !backup_exists
+            && !staged_exists
+            && !original_exists
+        {
+            return clear_uninstall_journal(&self.store_root);
         }
-        if let Some(parent) = transaction.version_root.parent() {
-            let _ = sync_directory(parent);
+        self.restore_transaction_files(&transaction)?;
+        save_state(&self.store_root, &transaction.previous_state)?;
+        clear_uninstall_journal(&self.store_root)
+    }
+
+    fn backup_package(&self, source: &Path, backup: &Path) -> Result<(), PackageError> {
+        let parent = backup
+            .parent()
+            .ok_or_else(|| PackageError::AtomicUninstall {
+                detail: "uninstall backup has no parent directory".to_owned(),
+            })?;
+        fs::create_dir_all(parent).map_err(|error| PackageError::AtomicUninstall {
+            detail: format!("create uninstall backup directory failed: {error}"),
+        })?;
+        let file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(backup)
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("create uninstall rollback backup failed: {error}"),
+            })?;
+        let mut archive = zip::ZipWriter::new(file);
+        let mut files = Vec::new();
+        collect_package_files(source, Path::new(""), &mut files)?;
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        for (relative, path) in files {
+            self.check_uninstall_fault(UninstallFinalizationFault::BeforeBackupRead)?;
+            let bytes = fs::read(&path).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("read package for uninstall rollback backup failed: {error}"),
+            })?;
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            archive
+                .start_file(relative.to_string_lossy().as_ref(), options)
+                .map_err(|error| PackageError::AtomicUninstall {
+                    detail: format!("write uninstall rollback backup entry failed: {error}"),
+                })?;
+            archive
+                .write_all(&bytes)
+                .map_err(|error| PackageError::AtomicUninstall {
+                    detail: format!("write uninstall rollback backup failed: {error}"),
+                })?;
+        }
+        let file = archive
+            .finish()
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("finish uninstall rollback backup failed: {error}"),
+            })?;
+        file.sync_all()
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("sync uninstall rollback backup failed: {error}"),
+            })?;
+        sync_directory(parent).map_err(|error| PackageError::AtomicUninstall {
+            detail: format!("sync uninstall rollback backup directory failed: {error}"),
+        })
+    }
+
+    fn restore_transaction_files(
+        &self,
+        transaction: &UninstallTransaction,
+    ) -> Result<(), PackageError> {
+        let staged_exists = path_exists(&transaction.staged_root)?;
+        let original_exists = path_exists(&transaction.original_root)?;
+        let backup_exists = path_exists(&transaction.backup_path)?;
+        let use_staged = matches!(
+            transaction.phase,
+            UninstallPhase::Prepared | UninstallPhase::Moved
+        ) && staged_exists;
+        if use_staged {
+            if original_exists {
+                fs::remove_dir_all(&transaction.original_root).map_err(|error| {
+                    PackageError::AtomicUninstall {
+                        detail: format!(
+                            "remove conflicting package during rollback failed: {error}"
+                        ),
+                    }
+                })?;
+            }
+            self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreMove)?;
+            fs::rename(&transaction.staged_root, &transaction.original_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("move staged package back during rollback failed: {error}"),
+                }
+            })?;
+            if let Some(parent) = transaction.original_root.parent() {
+                sync_directory(parent).map_err(|error| PackageError::AtomicUninstall {
+                    detail: format!("sync restored package directory failed: {error}"),
+                })?;
+            }
+        } else if backup_exists {
+            self.restore_from_backup(transaction)?;
+        } else if !original_exists {
+            return Err(PackageError::AtomicUninstall {
+                detail: "uninstall rollback has neither staged package nor rollback backup"
+                    .to_owned(),
+            });
+        }
+
+        if path_exists(&transaction.staged_root)? {
+            fs::remove_dir_all(&transaction.staged_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("remove staged package after rollback failed: {error}"),
+                }
+            })?;
+        }
+
+        if path_exists(&transaction.backup_path)? {
+            fs::remove_file(&transaction.backup_path).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!(
+                        "remove uninstall rollback backup after restore failed: {error}"
+                    ),
+                }
+            })?;
+            sync_directory(&self.store_root).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("sync module store after rollback failed: {error}"),
+            })?;
+        }
+        Ok(())
+    }
+
+    fn restore_from_backup(&self, transaction: &UninstallTransaction) -> Result<(), PackageError> {
+        self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreRead)?;
+        let bytes =
+            fs::read(&transaction.backup_path).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("read uninstall rollback backup failed: {error}"),
+            })?;
+        let parent =
+            transaction
+                .original_root
+                .parent()
+                .ok_or_else(|| PackageError::AtomicUninstall {
+                    detail: "uninstall rollback package has no parent directory".to_owned(),
+                })?;
+        fs::create_dir_all(parent).map_err(|error| PackageError::AtomicUninstall {
+            detail: format!("create package parent during rollback failed: {error}"),
+        })?;
+        let restore_root = parent.join(format!(".uninstall-restore-{}", Uuid::new_v4()));
+        let result = (|| {
+            fs::create_dir(&restore_root).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("create temporary uninstall restore directory failed: {error}"),
+            })?;
+            let cursor = Cursor::new(bytes);
+            let mut archive =
+                ZipArchive::new(cursor).map_err(|error| PackageError::AtomicUninstall {
+                    detail: format!("open uninstall rollback backup failed: {error}"),
+                })?;
+            for index in 0..archive.len() {
+                let mut entry =
+                    archive
+                        .by_index(index)
+                        .map_err(|error| PackageError::AtomicUninstall {
+                            detail: format!("read uninstall rollback backup entry failed: {error}"),
+                        })?;
+                let relative = normalize_archive_path(entry.name())?;
+                let destination = restore_root.join(Path::new(&relative));
+                if entry.is_dir() {
+                    fs::create_dir_all(&destination).map_err(|error| {
+                        PackageError::AtomicUninstall {
+                            detail: format!("create restored package directory failed: {error}"),
+                        }
+                    })?;
+                    continue;
+                }
+                if let Some(destination_parent) = destination.parent() {
+                    fs::create_dir_all(destination_parent).map_err(|error| {
+                        PackageError::AtomicUninstall {
+                            detail: format!("create restored package parent failed: {error}"),
+                        }
+                    })?;
+                }
+                let mut output = OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(&destination)
+                    .map_err(|error| PackageError::AtomicUninstall {
+                        detail: format!("create restored package entry failed: {error}"),
+                    })?;
+                let mut content = Vec::new();
+                entry
+                    .read_to_end(&mut content)
+                    .map_err(|error| PackageError::AtomicUninstall {
+                        detail: format!("read restored package entry failed: {error}"),
+                    })?;
+                output
+                    .write_all(&content)
+                    .map_err(|error| PackageError::AtomicUninstall {
+                        detail: format!("write restored package entry failed: {error}"),
+                    })?;
+                output
+                    .sync_all()
+                    .map_err(|error| PackageError::AtomicUninstall {
+                        detail: format!("sync restored package entry failed: {error}"),
+                    })?;
+            }
+            sync_directory(&restore_root).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("sync temporary uninstall restore directory failed: {error}"),
+            })?;
+            if path_exists(&transaction.original_root)? {
+                fs::remove_dir_all(&transaction.original_root).map_err(|error| {
+                    PackageError::AtomicUninstall {
+                        detail: format!(
+                            "remove incomplete package during rollback failed: {error}"
+                        ),
+                    }
+                })?;
+            }
+            self.check_uninstall_fault(UninstallFinalizationFault::BeforeRestoreMove)?;
+            fs::rename(&restore_root, &transaction.original_root).map_err(|error| {
+                PackageError::AtomicUninstall {
+                    detail: format!("move restored package into place failed: {error}"),
+                }
+            })?;
+            sync_directory(parent).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("sync restored package parent failed: {error}"),
+            })?;
+            Ok::<(), PackageError>(())
+        })();
+        if let Err(error) = result {
+            match fs::remove_dir_all(&restore_root) {
+                Ok(()) => {}
+                Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => {}
+                Err(cleanup) => {
+                    return Err(PackageError::AtomicUninstall {
+                        detail: format!("{error}; restore temporary cleanup failed: {cleanup}"),
+                    });
+                }
+            }
+            return Err(error);
         }
         Ok(())
     }
@@ -536,6 +941,7 @@ impl PackageInstaller {
     }
 
     pub(crate) fn current_registry(&self) -> Result<Vec<InstalledModule>, PackageError> {
+        self.recover_pending_uninstall()?;
         let modules = self.reconstruct_registry()?;
         let mut state = load_state(&self.store_root)?;
         let mut current = std::collections::BTreeMap::<String, InstalledModule>::new();
@@ -686,6 +1092,55 @@ fn catalog_info(
 
 fn prefixed_digest(bytes: &[u8]) -> String {
     format!("sha256:{}", digest(bytes))
+}
+
+fn path_exists(path: &Path) -> Result<bool, PackageError> {
+    match fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(PackageError::AtomicUninstall {
+            detail: format!("inspect transactional path failed: {error}"),
+        }),
+    }
+}
+
+fn collect_package_files(
+    root: &Path,
+    relative_root: &Path,
+    files: &mut Vec<(PathBuf, PathBuf)>,
+) -> Result<(), PackageError> {
+    let entries = fs::read_dir(root).map_err(|error| PackageError::AtomicUninstall {
+        detail: format!("read package during uninstall backup failed: {error}"),
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| PackageError::AtomicUninstall {
+            detail: format!("read package entry during uninstall backup failed: {error}"),
+        })?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("read package entry type during uninstall backup failed: {error}"),
+            })?;
+        let relative = relative_root.join(entry.file_name());
+        let path = entry.path();
+        if file_type.is_symlink() {
+            return Err(PackageError::AtomicUninstall {
+                detail: format!("package contains a symlink during uninstall backup: {path:?}"),
+            });
+        }
+        if file_type.is_dir() {
+            collect_package_files(&path, &relative, files)?;
+        } else if file_type.is_file() {
+            files.push((relative, path));
+        } else {
+            return Err(PackageError::AtomicUninstall {
+                detail: format!(
+                    "package contains an unsupported entry during uninstall backup: {path:?}"
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn normalize_archive_path(path: &str) -> Result<String, PackageError> {

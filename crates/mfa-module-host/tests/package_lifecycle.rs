@@ -10,6 +10,9 @@ use tempfile::TempDir;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
@@ -432,6 +435,327 @@ fn checked_in_valid_source_fixture_is_installable() {
     );
     let installed = installer.install(&fixture).unwrap();
     assert!(installed.root.join("module.wasm").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn uninstall_reports_package_delete_failure_and_preserves_the_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let installed = install_fixture(&installer, &packages, "delete-failure-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let mut transaction = installer.stage_uninstall(&module_id).unwrap();
+    let staged_root = fs::read_dir(installed.root.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".uninstall-staging-"))
+        })
+        .unwrap();
+    fs::set_permissions(&staged_root, fs::Permissions::from_mode(0o500)).unwrap();
+
+    installer.apply_uninstall(&mut transaction).unwrap();
+    let result = installer.finalize_uninstall(&mut transaction);
+
+    fs::set_permissions(&staged_root, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(result.is_err(), "package deletion failure was suppressed");
+    installer.rollback_uninstall(&mut transaction).unwrap();
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+    assert!(!has_uninstall_staging_directory(
+        installed.root.parent().unwrap()
+    ));
+}
+
+#[test]
+fn reopening_after_an_interrupted_uninstall_restores_the_previous_package_and_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let installed = install_fixture(
+        &installer,
+        &packages,
+        "interrupted-uninstall-source",
+        "1.0.0",
+    );
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let mut transaction = installer.stage_uninstall(&module_id).unwrap();
+    installer.apply_uninstall(&mut transaction).unwrap();
+    drop(transaction);
+    drop(installer);
+
+    let reopened = PackageInstaller::new(store.path());
+    let modules = reopened.list().unwrap();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].module_id, module_id);
+    assert!(!modules[0].enabled);
+    assert!(installed.root.exists());
+    assert!(reopened.resolve_active(&module_id).is_err());
+}
+
+#[test]
+fn post_delete_read_failure_restores_package_bytes_and_registry_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::AfterDeleteBeforeRead,
+    );
+    let installed = install_fixture(&installer, &packages, "post-delete-read-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+    assert!(!has_uninstall_staging_directory(
+        installed.root.parent().unwrap()
+    ));
+}
+
+#[test]
+fn post_read_remove_failure_restores_package_bytes_and_registry_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::AfterReadBeforeRemoveVersion,
+    );
+    let installed = install_fixture(&installer, &packages, "post-read-remove-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+}
+
+#[test]
+fn post_remove_sync_failure_restores_package_bytes_and_registry_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::AfterRemoveBeforeSync,
+    );
+    let installed = install_fixture(&installer, &packages, "post-remove-sync-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+}
+
+#[test]
+fn corrupt_uninstall_journal_is_reported_without_panicking_during_recovery() {
+    let store = TempDir::new().unwrap();
+    fs::create_dir_all(store.path()).unwrap();
+    fs::write(
+        store.path().join(".uninstall-transaction.json"),
+        r#"{
+            "module_id": "",
+            "original_root": "/tmp/original",
+            "staged_root": "/tmp/staged",
+            "backup_path": "/tmp/backup.zip",
+            "version_root": "/tmp/version",
+            "previous_state": {},
+            "phase": "Prepared"
+        }"#,
+    )
+    .unwrap();
+
+    let result = std::panic::catch_unwind(|| PackageInstaller::new(store.path()).list());
+
+    assert!(result.is_ok(), "corrupt journal recovery panicked");
+    assert!(result.unwrap().is_err());
+}
+
+#[test]
+fn stage_move_failure_preserves_package_and_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::BeforeStageMove,
+    );
+    let installed = install_fixture(&installer, &packages, "stage-move-failure-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+#[test]
+fn post_stage_move_sync_failure_restores_package_and_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::AfterStageMoveBeforeSync,
+    );
+    let installed = install_fixture(&installer, &packages, "post-stage-sync-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+#[test]
+fn backup_read_failure_restores_staged_package_and_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::BeforeBackupRead,
+    );
+    let installed = install_fixture(&installer, &packages, "backup-read-failure-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+#[test]
+fn backup_delete_failure_restores_package_and_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::BeforeBackupDelete,
+    );
+    let installed = install_fixture(
+        &installer,
+        &packages,
+        "backup-delete-failure-source",
+        "1.0.0",
+    );
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+#[test]
+fn state_sync_failure_preserves_package_and_previous_state() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::BeforeStateSync,
+    );
+    let installed = install_fixture(&installer, &packages, "state-sync-failure-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let error = installer.uninstall(&module_id).unwrap_err();
+
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+    assert!(installed.root.exists());
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert!(installer.resolve_active(&module_id).is_err());
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+#[test]
+fn recovery_restore_move_failure_keeps_the_transaction_for_a_clean_restart() {
+    assert_recovery_fault_restores(
+        mfa_module_host::UninstallFinalizationFault::BeforeRestoreMove,
+        "recovery-restore-move-source",
+    );
+}
+
+#[test]
+fn recovery_restore_read_failure_keeps_the_transaction_for_a_clean_restart() {
+    assert_recovery_fault_restores(
+        mfa_module_host::UninstallFinalizationFault::BeforeRestoreRead,
+        "recovery-restore-read-source",
+    );
+}
+
+fn assert_recovery_fault_restores(
+    fault: mfa_module_host::UninstallFinalizationFault,
+    module_name: &str,
+) {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let installed = install_fixture(&installer, &packages, module_name, "1.0.0");
+    let module_id = installed.module_id.clone();
+    let expected_wasm = fs::read(installed.root.join("module.wasm")).unwrap();
+    installer.set_enabled(&module_id, false).unwrap();
+
+    let mut transaction = installer.stage_uninstall(&module_id).unwrap();
+    installer.apply_uninstall(&mut transaction).unwrap();
+    drop(transaction);
+    drop(installer);
+
+    let faulted = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(fault);
+    let error = faulted.list().unwrap_err();
+    assert_eq!(error.code(), "atomic_uninstall_failed");
+
+    let reopened = PackageInstaller::new(store.path());
+    let modules = reopened.list().unwrap();
+    assert_eq!(modules.len(), 1);
+    assert!(!modules[0].enabled);
+    assert_eq!(
+        fs::read(installed.root.join("module.wasm")).unwrap(),
+        expected_wasm
+    );
+    assert_uninstall_artifacts_absent(&store, installed.root.parent().unwrap());
+}
+
+fn has_uninstall_staging_directory(version_root: &Path) -> bool {
+    version_root.read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".uninstall-staging-")
+    })
+}
+
+fn assert_uninstall_artifacts_absent(store: &TempDir, version_root: &Path) {
+    assert!(!store.path().join(".uninstall-transaction.json").exists());
+    assert!(!store.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".uninstall-backup-")
+    }));
+    assert!(!has_uninstall_staging_directory(version_root));
 }
 
 #[allow(dead_code)]
