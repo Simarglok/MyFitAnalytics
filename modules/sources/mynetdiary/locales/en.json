@@ -1,0 +1,11 @@
+{
+  "locale": "en",
+  "namespace": "source.mynetdiary",
+  "messages": {
+    "module.name": "MyNetDiary",
+    "module.description": "Import synthetic-compatible MyNetDiary yearly BIFF workbooks",
+    "error.invalid_biff": "The workbook is not a valid MyNetDiary BIFF export.",
+    "error.missing_sheet": "A required MyNetDiary sheet is missing.",
+    "error.missing_column": "A required MyNetDiary column is missing."
+  }
+}

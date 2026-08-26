@@ -1,0 +1,16 @@
+{
+  "module_type": "source",
+  "module_id": "mynetdiary",
+  "module_version": "1.0.0",
+  "package_format_version": "1.0.0",
+  "source_api_version": "1.0.0",
+  "mapping_version": "1.0.0",
+  "compatible_app_versions": [">=0.1.0"],
+  "provided_capabilities": ["nutrition.items", "activity.events"],
+  "accepted_file_patterns": ["*.xls", "application/vnd.ms-excel"],
+  "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+  "extension_contracts": [],
+  "settings_schema": {},
+  "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "localization_namespace": "source.mynetdiary"
+}
