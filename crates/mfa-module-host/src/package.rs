@@ -89,6 +89,8 @@ pub enum UninstallFinalizationFault {
     AfterReadBeforeRemoveVersion,
     AfterRemoveBeforeSync,
     BeforeBackupDelete,
+    AfterBackupDeleteBeforeSync,
+    BeforeJournalClear,
     BeforeRegistryRefresh,
     BeforeRestoreMove,
     BeforeRestoreRead,
@@ -797,15 +799,27 @@ impl PackageInstaller {
         transaction.phase = UninstallPhase::Committed;
         save_uninstall_journal(&self.store_root, &transaction.journal())?;
         self.check_uninstall_fault(UninstallFinalizationFault::BeforeBackupDelete)?;
-        fs::remove_file(&transaction.backup_path).map_err(|error| {
-            PackageError::AtomicUninstall {
-                detail: format!("remove uninstall rollback backup failed: {error}"),
-            }
-        })?;
-        sync_directory(&self.store_root).map_err(|error| PackageError::AtomicUninstall {
-            detail: format!("sync module store after uninstall failed: {error}"),
-        })?;
-        clear_uninstall_journal(&self.store_root)?;
+        if fs::remove_file(&transaction.backup_path).is_err() {
+            return Ok(());
+        }
+        if self
+            .check_uninstall_fault(UninstallFinalizationFault::AfterBackupDeleteBeforeSync)
+            .is_err()
+        {
+            return Ok(());
+        }
+        if sync_directory(&self.store_root).is_err() {
+            return Ok(());
+        }
+        if self
+            .check_uninstall_fault(UninstallFinalizationFault::BeforeJournalClear)
+            .is_err()
+        {
+            return Ok(());
+        }
+        if clear_uninstall_journal(&self.store_root).is_err() {
+            return Ok(());
+        }
         Ok(())
     }
 
@@ -839,12 +853,24 @@ impl PackageInstaller {
         let backup_exists = path_exists(&transaction.backup_path)?;
         let staged_exists = path_exists(&transaction.staged_root)?;
         let original_exists = path_exists(&transaction.original_root)?;
-        if transaction.phase == UninstallPhase::Committed
-            && !backup_exists
-            && !staged_exists
-            && !original_exists
-        {
-            return clear_uninstall_journal(&self.store_root);
+        if transaction.phase == UninstallPhase::Committed {
+            if staged_exists || original_exists {
+                return Err(PackageError::AtomicUninstall {
+                    detail: "committed uninstall has recoverable package bytes".to_owned(),
+                });
+            }
+            if backup_exists {
+                if fs::remove_file(&transaction.backup_path).is_err() {
+                    return Ok(());
+                }
+                if sync_directory(&self.store_root).is_err() {
+                    return Ok(());
+                }
+            }
+            if clear_uninstall_journal(&self.store_root).is_err() {
+                return Ok(());
+            }
+            return Ok(());
         }
         self.restore_transaction_files(&transaction)?;
         save_state(&self.store_root, &transaction.previous_state)?;

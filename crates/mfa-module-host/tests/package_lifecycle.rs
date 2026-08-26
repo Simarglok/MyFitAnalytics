@@ -771,6 +771,51 @@ fn backup_delete_failure_restores_package_and_previous_state() {
 }
 
 #[test]
+fn post_backup_delete_sync_failure_keeps_committed_uninstall_for_restart_cleanup() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::AfterBackupDeleteBeforeSync,
+    );
+    let installed = install_fixture(
+        &installer,
+        &packages,
+        "post-backup-delete-sync-source",
+        "1.0.0",
+    );
+    let module_id = installed.module_id.clone();
+
+    installer.uninstall(&module_id).unwrap();
+
+    assert!(!installed.root.exists());
+    assert!(store.path().join(".uninstall-transaction.json").exists());
+    let reopened = PackageInstaller::new(store.path());
+    assert!(reopened.list().unwrap().is_empty());
+    assert!(reopened.resolve_active(&module_id).is_err());
+    assert!(!store.path().join(".uninstall-transaction.json").exists());
+}
+
+#[test]
+fn journal_clear_failure_keeps_committed_uninstall_for_restart_cleanup() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path()).with_uninstall_finalization_fault(
+        mfa_module_host::UninstallFinalizationFault::BeforeJournalClear,
+    );
+    let installed = install_fixture(&installer, &packages, "journal-clear-source", "1.0.0");
+    let module_id = installed.module_id.clone();
+
+    installer.uninstall(&module_id).unwrap();
+
+    assert!(!installed.root.exists());
+    assert!(store.path().join(".uninstall-transaction.json").exists());
+    let reopened = PackageInstaller::new(store.path());
+    assert!(reopened.list().unwrap().is_empty());
+    assert!(reopened.resolve_active(&module_id).is_err());
+    assert!(!store.path().join(".uninstall-transaction.json").exists());
+}
+
+#[test]
 fn state_sync_failure_preserves_package_and_previous_state() {
     let store = TempDir::new().unwrap();
     let packages = TempDir::new().unwrap();
