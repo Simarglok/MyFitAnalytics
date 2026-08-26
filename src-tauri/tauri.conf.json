@@ -26,6 +26,9 @@
   },
   "bundle": {
     "active": true,
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "resources": {
       "../dist/modules/*.mfasource": "modules/"
     }
