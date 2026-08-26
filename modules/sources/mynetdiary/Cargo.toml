@@ -6,14 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 calamine = { version = "0.36.1", features = ["chrono"] }
-chrono.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["alloc", "serde"] }
 mfa-contracts = { path = "../../../crates/mfa-contracts" }
 mfa-source-sdk = { path = "../../sdk/rust" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+uuid = { version = "1", features = ["serde"] }
+wit-bindgen = "=0.46.0"
 
 [dev-dependencies]
 sha2.workspace = true

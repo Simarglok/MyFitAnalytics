@@ -6,12 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["alloc", "serde"] }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
+uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
 jsonschema.workspace = true

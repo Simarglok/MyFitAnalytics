@@ -9,7 +9,16 @@
   "provided_capabilities": ["nutrition.items", "activity.events"],
   "accepted_file_patterns": ["*.xls", "application/vnd.ms-excel"],
   "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
-  "extension_contracts": [],
+  "extension_contracts": [
+    {
+      "namespace": "mynetdiary.water-glasses",
+      "contract_version": "1.0.0",
+      "payload_schema": {
+        "type": "object",
+        "required": ["glasses", "water_ml"]
+      }
+    }
+  ],
   "settings_schema": {},
   "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "localization_namespace": "source.mynetdiary"

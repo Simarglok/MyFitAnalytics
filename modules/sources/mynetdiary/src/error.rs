@@ -16,6 +16,20 @@ pub enum MappingError {
         row: usize,
         value: String,
     },
+    #[error("invalid number `{value}` in `{sheet}` row {row}, column `{column}`")]
+    InvalidNumber {
+        sheet: String,
+        row: usize,
+        column: String,
+        value: String,
+    },
+    #[error("negative number `{value}` in `{sheet}` row {row}, column `{column}`")]
+    NegativeNumber {
+        sheet: String,
+        row: usize,
+        column: String,
+        value: String,
+    },
     #[error("workbook dates span multiple calendar years: {years:?}")]
     MixedCalendarYear { years: Vec<i32> },
     #[error("workbook contains no calendar year")]
@@ -30,6 +44,8 @@ impl MappingError {
             Self::MissingColumn { .. } => "mynetdiary.missing_column",
             Self::DuplicateColumn { .. } => "mynetdiary.duplicate_column",
             Self::InvalidDate { .. } => "mynetdiary.invalid_date",
+            Self::InvalidNumber { .. } => "mynetdiary.invalid_number",
+            Self::NegativeNumber { .. } => "mynetdiary.negative_number",
             Self::MixedCalendarYear { .. } => "mynetdiary.mixed_calendar_year",
             Self::MissingCalendarYear => "mynetdiary.missing_calendar_year",
         }

@@ -5,37 +5,37 @@
     {
       "file": "valid-full.xls",
       "scenario": "all required sheets and optional sheets",
-      "sha256": "527aca16e8f7562ff1c6766dd1cb00aa32592793c0104e344267c12bb619c1c3"
+      "sha256": "9595107c80d2d803962269035195b0507fabc7035a1eb3e76790b4b30a64e33b"
     },
     {
       "file": "missing-required-sheet.xls",
       "scenario": "Exercise sheet omitted",
-      "sha256": "ba9e8bfbb12fa7618eb4a4d9c9032d2c5e915ef286b81852954d175979f2e4b7"
+      "sha256": "09b66d2f0b52a669f5d4ad8ac839f90a446f21328e55c61e7dd1ce8f4ca64b38"
     },
     {
       "file": "optional-sheets-absent.xls",
       "scenario": "Trackers and Water Glasses omitted",
-      "sha256": "c0d77856dd98c6d88da6191c84d552b466b27354aa786ddf7a9814b804fc3245"
+      "sha256": "c07c11bb3a2efaf20ebea5da90173fbfc1176b547b0c7cc05bba2a2817bb90da"
     },
     {
       "file": "schema-drift.xls",
       "scenario": "required Food column renamed",
-      "sha256": "14f133db36f62c6dfa1757fee7f201d42c74b79c1e4b850d79fffa3458753def"
+      "sha256": "bf22f8382c271606fbf1413d2d01113800069080ac810fe10acd95f381b399cb"
     },
     {
       "file": "mixed-year.xls",
       "scenario": "dates span two calendar years",
-      "sha256": "02648ad362df9ba789440f69a35b4f059583d92a1eab76ce37858d84ef606949"
+      "sha256": "1650b5b5dd229f023b449a744fac22d55895304bf075e7a948b0fd37e8f64ba8"
     },
     {
       "file": "unknown-activity.xls",
       "scenario": "governed activity name is unknown",
-      "sha256": "0307feadcd42a22010b8fafa4fd74abd32e928ddfe76134162f3b1dbb23d6d2f"
+      "sha256": "c101f15bb3f77139028868e06bc6518113ab70a1244e47854257e83e26001df5"
     },
     {
       "file": "decimal-comma-nbsp.xls",
       "scenario": "decimal comma and NBSP numeric text",
-      "sha256": "f17fdc4df36c8f5bab1daee17509531d421986d543186cd3434dc7b24781a0f6"
+      "sha256": "a822d32ea86959f971ef281dd5262b20d918389d68cc2612f954df1331a9d372"
     }
   ]
 }

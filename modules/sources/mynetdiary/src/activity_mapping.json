@@ -1,0 +1,10 @@
+{
+  "Walking": { "activity_type": "walking" },
+  "Running": { "activity_type": "running" },
+  "Hiking": { "activity_type": "hiking" },
+  "Cycling": { "activity_type": "cycling" },
+  "Elliptical": { "activity_type": "elliptical" },
+  "Treadmill Walking": { "activity_type": "walking" },
+  "Treadmill Running": { "activity_type": "running" },
+  "Stretching": { "activity_type": "stretching" }
+}

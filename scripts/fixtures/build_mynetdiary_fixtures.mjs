@@ -22,7 +22,7 @@ const fullSheets = {
   Food: [
     foodHeader,
     ["2026-01-04", "08:15", "Synthetic Oatmeal", "F-001", "1 serving", "320", "12.5", "8.0", "48.0", "6.0", "9.0", "180", "fictional breakfast"],
-    ["2026-01-04", "08:15", "Synthetic Oatmeal", "F-001", "1 serving", "320", "12.5", "8.0", "48.0", "6.0", "9.0", "180", "duplicate row remains distinct"],
+    ["2026-01-04", "08:15", "Synthetic Oatmeal", "F-001", "1 serving", "320", "", "8.0", "48.0", "6.0", "9.0", "180", "duplicate row remains distinct"],
   ],
   Measurements: [
     measurementsHeader,
