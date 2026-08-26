@@ -15,7 +15,7 @@ pub use limits::RuntimeLimits;
 pub use locales::{LocaleError, LocaleResolver, ResolvedMessage};
 pub use package::{
     BundledModuleUpdate, BundledPackageInfo, InspectedEntry, InspectedPackage, InstalledModule,
-    PackageInstaller,
+    PackageInstaller, UninstallFinalizationFault, UninstallTransaction,
 };
 pub use registry::ModuleRegistry;
 pub use runtime::{ComponentRuntime, RuntimeError};

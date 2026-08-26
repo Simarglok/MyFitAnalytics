@@ -117,6 +117,10 @@ impl RecoveryGate {
         self.mode.store(1, Ordering::Release);
     }
 
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.mode) as usize
+    }
+
     pub fn ensure_ingestion_allowed(&self) -> Result<(), crate::IngestionError> {
         if self.mode() == RecoveryMode::Normal {
             Ok(())

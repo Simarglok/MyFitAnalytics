@@ -17,6 +17,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub app_data_root: Option<std::path::PathBuf>,
     #[serde(default)]
+    pub source_inbox_roots: BTreeMap<ModuleId, PathBuf>,
+    #[serde(default)]
     pub active_providers: BTreeMap<CapabilityId, ModuleId>,
 }
 
@@ -27,6 +29,7 @@ impl Default for AppSettings {
             locale: "en-US".to_owned(),
             workspace_root: None,
             app_data_root: None,
+            source_inbox_roots: BTreeMap::new(),
             active_providers: BTreeMap::new(),
         }
     }

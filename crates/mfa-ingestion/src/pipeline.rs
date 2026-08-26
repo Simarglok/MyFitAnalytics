@@ -237,6 +237,10 @@ impl IngestionCoordinator {
         })
     }
 
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.state) as usize
+    }
+
     pub async fn request_scan(
         &self,
         request: ScanRequest,

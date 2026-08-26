@@ -2,6 +2,7 @@ use crate::commands;
 use crate::events::tauri_event_sink;
 use crate::state::AppState;
 use mfa_config::SettingsStore;
+use mfa_contracts::ModuleManifest;
 use mfa_module_host::{CapabilityRegistry, ModuleRegistry, PackageInstaller};
 use std::error::Error;
 use std::path::Path;
@@ -14,7 +15,15 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap_state,
             commands::list_modules,
-            commands::set_workspace_root,
+            commands::list_module_catalog,
+            commands::choose_workspace_root,
+            commands::get_workspace_view,
+            commands::choose_and_install_module,
+            commands::choose_source_inbox,
+            commands::set_module_enabled,
+            commands::update_module,
+            commands::uninstall_module,
+            commands::select_module_provider,
             commands::refresh_now,
             commands::get_ingestion_status,
             commands::list_quality_items,
@@ -28,10 +37,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let config_root = app.path().app_config_dir()?;
     let module_root = app.path().app_data_dir()?.join("modules");
-    install_bundled_modules(app, &module_root)?;
+    let bundled_packages = install_bundled_modules(app, &module_root)?;
     apply_bundled_provider_defaults(&config_root, &module_root)?;
     let state =
         AppState::from_roots_with_core_catalog(config_root, module_root, CORE_ENGLISH_CATALOG)?;
+    for (module_id, package) in bundled_packages {
+        state.register_bundled_package(module_id, package);
+    }
     state.set_event_sink(tauri_event_sink(app.handle()));
     if let Some(workspace_root) = state.settings().workspace_root.clone() {
         tauri::async_runtime::block_on(state.configure_workspace(workspace_root))?;
@@ -40,7 +52,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn install_bundled_modules(app: &tauri::App, module_root: &Path) -> Result<(), Box<dyn Error>> {
+fn install_bundled_modules(
+    app: &tauri::App,
+    module_root: &Path,
+) -> Result<Vec<(mfa_contracts::ModuleId, std::path::PathBuf)>, Box<dyn Error>> {
     let installer = PackageInstaller::new(module_root);
     let resource_root = app.path().resource_dir()?.join("modules");
     let packages = ["mynetdiary", "hevy"]
@@ -49,7 +64,17 @@ fn install_bundled_modules(app: &tauri::App, module_root: &Path) -> Result<(), B
         .filter(|package| package.exists())
         .collect::<Vec<_>>();
     installer.install_bundled_defaults(&packages)?;
-    Ok(())
+    let mut registered = Vec::new();
+    for package in packages {
+        let inspected = installer.inspect(&package)?;
+        let module_id = match inspected.manifest {
+            ModuleManifest::Source(manifest) => manifest.module_id,
+            ModuleManifest::Dashboard(manifest) => manifest.module_id,
+            ModuleManifest::Locale(manifest) => manifest.module_id,
+        };
+        registered.push((module_id, package));
+    }
+    Ok(registered)
 }
 
 fn apply_bundled_provider_defaults(

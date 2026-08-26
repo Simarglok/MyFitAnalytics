@@ -22,8 +22,10 @@ pub fn map_trackers(
             continue;
         }
         let raw = text(sheet, row, "Value");
-        let heart_rate_bpm =
-            parse_non_negative(&raw, &sheet.name, row_number, "Value")?.unwrap_or_default();
+        let Some(heart_rate_bpm) = parse_non_negative(&raw, &sheet.name, row_number, "Value")?
+        else {
+            continue;
+        };
         let observation = HeartRateObservation {
             heart_rate_observation_id: deterministic_id(
                 context,

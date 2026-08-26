@@ -1,5 +1,7 @@
 use crate::error::PackageError;
-use crate::store::{BundledCatalogEntry, load_state, save_state, sync_directory};
+use crate::store::{
+    ActivePackage, BundledCatalogEntry, ModuleState, load_state, save_state, sync_directory,
+};
 use jsonschema::validator_for;
 use mfa_contracts::{
     ContractVersion, DashboardManifest, LocaleManifest, ModuleId, ModuleManifest, ModuleType,
@@ -65,24 +67,54 @@ pub struct BundledModuleUpdate {
     pub installed: Option<BundledPackageInfo>,
 }
 
+pub struct UninstallTransaction {
+    module_id: ModuleId,
+    original_root: PathBuf,
+    staged_root: PathBuf,
+    version_root: PathBuf,
+    previous_state: ModuleState,
+    state_applied: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UninstallFinalizationFault {
+    BeforeDelete,
+}
+
 #[derive(Debug, Clone)]
 pub struct PackageInstaller {
     pub(crate) store_root: PathBuf,
     max_uncompressed_bytes: u64,
     host_api_range: VersionReq,
+    current_app_version: Version,
+    uninstall_finalization_fault: Option<UninstallFinalizationFault>,
 }
 
 impl PackageInstaller {
     pub fn new(store_root: impl Into<PathBuf>) -> Self {
+        Self::with_app_version(
+            store_root,
+            Version::parse(env!("CARGO_PKG_VERSION")).expect("package version is valid semver"),
+        )
+    }
+
+    pub fn with_app_version(store_root: impl Into<PathBuf>, current_app_version: Version) -> Self {
         Self {
             store_root: store_root.into(),
             max_uncompressed_bytes: DEFAULT_MAX_UNCOMPRESSED_BYTES,
             host_api_range: VersionReq::parse(HOST_API_RANGE).expect("static host API range"),
+            current_app_version,
+            uninstall_finalization_fault: None,
         }
     }
 
     pub fn with_max_uncompressed_bytes(mut self, limit: u64) -> Self {
         self.max_uncompressed_bytes = limit;
+        self
+    }
+
+    pub fn with_uninstall_finalization_fault(mut self, fault: UninstallFinalizationFault) -> Self {
+        self.uninstall_finalization_fault = Some(fault);
         self
     }
 
@@ -148,6 +180,7 @@ impl PackageInstaller {
         validate_payload_security(&entries, manifest.module_type())?;
         validate_manifest_schema(&manifest_value, manifest.module_type())?;
         validate_package_extension(package, manifest.module_type())?;
+        validate_app_version_compatibility(&manifest, &self.current_app_version)?;
         validate_package_compatibility(&manifest, &self.host_api_range)?;
         validate_entrypoint(&manifest, &entries)?;
 
@@ -168,6 +201,7 @@ impl PackageInstaller {
             .join(&inspected.package_hash);
         if final_root.exists() {
             self.ensure_default_state(module_id)?;
+            self.activate_package(module_id, module_version, &inspected.package_hash)?;
             return self.installed_from_inspection(&inspected, final_root);
         }
 
@@ -209,6 +243,7 @@ impl PackageInstaller {
         }
         result?;
         self.ensure_default_state(module_id)?;
+        self.activate_package(module_id, module_version, &inspected.package_hash)?;
         let _ = module_type;
         self.installed_from_inspection(&inspected, final_root)
     }
@@ -233,8 +268,7 @@ impl PackageInstaller {
             );
         }
         save_state(&self.store_root, &state)?;
-
-        let installed = self.reconstruct_registry()?;
+        let installed = self.current_registry()?;
         for (path, package) in inspected {
             let (module_id, _, _) = manifest_identity(&package.manifest);
             let explicitly_disabled = state
@@ -262,7 +296,7 @@ impl PackageInstaller {
 
     pub fn available_bundled_updates(&self) -> Result<Vec<BundledModuleUpdate>, PackageError> {
         let catalog = self.bundled_catalog()?;
-        let installed = self.reconstruct_registry()?;
+        let installed = self.current_registry()?;
         Ok(catalog
             .into_iter()
             .filter_map(|available| {
@@ -291,51 +325,139 @@ impl PackageInstaller {
     }
 
     pub fn set_enabled(&self, id: &ModuleId, enabled: bool) -> Result<(), PackageError> {
-        if !self
-            .reconstruct_registry()?
-            .iter()
-            .any(|module| &module.module_id == id)
-        {
-            return Err(PackageError::ModuleNotFound {
+        let module = self
+            .current_registry()?
+            .into_iter()
+            .find(|module| &module.module_id == id)
+            .ok_or_else(|| PackageError::ModuleNotFound {
                 module_id: id.to_string(),
-            });
+            })?;
+        if enabled && self.installed_app_compatibility_error(&module).is_some() {
+            return Err(PackageError::IncompatibleAppVersion);
         }
         let mut state = load_state(&self.store_root)?;
         state.modules.insert(id.to_string(), enabled);
         save_state(&self.store_root, &state)
     }
 
+    pub fn installed_app_compatibility_error(
+        &self,
+        module: &InstalledModule,
+    ) -> Option<&'static str> {
+        validate_app_version_compatibility(&module.manifest, &self.current_app_version)
+            .err()
+            .map(|error| error.code())
+    }
+
     pub fn uninstall(&self, id: &ModuleId) -> Result<(), PackageError> {
+        let mut transaction = self.stage_uninstall(id)?;
+        if let Err(error) = self.apply_uninstall(&mut transaction) {
+            let _ = self.rollback_uninstall(&mut transaction);
+            return Err(error);
+        }
+        if let Err(error) = self.finalize_uninstall(&mut transaction) {
+            return match self.rollback_uninstall(&mut transaction) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(PackageError::AtomicUninstall {
+                    detail: format!("{error}; rollback failed: {rollback}"),
+                }),
+            };
+        }
+        Ok(())
+    }
+
+    pub fn stage_uninstall(&self, id: &ModuleId) -> Result<UninstallTransaction, PackageError> {
         let selected = self
-            .reconstruct_registry()?
+            .current_registry()?
             .into_iter()
-            .filter(|module| &module.module_id == id)
-            .max_by(|left, right| {
-                left.module_version
-                    .cmp(&right.module_version)
-                    .then_with(|| left.package_hash.cmp(&right.package_hash))
-            })
+            .find(|module| &module.module_id == id)
             .ok_or_else(|| PackageError::ModuleNotFound {
                 module_id: id.to_string(),
             })?;
-        fs::remove_dir_all(&selected.root).map_err(PackageError::from)?;
-        let version_root = selected
-            .root
+        let original_root = selected.root.clone();
+        let version_root = original_root
             .parent()
             .ok_or_else(|| PackageError::AtomicInstall {
                 detail: "installed module has no version parent".to_owned(),
-            })?;
-        if version_root
-            .read_dir()
-            .map_err(PackageError::from)?
-            .next()
-            .is_none()
-        {
-            let _ = fs::remove_dir(version_root);
+            })?
+            .to_path_buf();
+        let staged_root = version_root.join(format!(".uninstall-staging-{}", Uuid::new_v4()));
+        let previous_state = load_state(&self.store_root)?;
+        fs::rename(&original_root, &staged_root).map_err(PackageError::from)?;
+        if let Err(error) = sync_directory(&version_root) {
+            let _ = fs::rename(&staged_root, &original_root);
+            return Err(error);
         }
-        let mut state = load_state(&self.store_root)?;
-        state.modules.insert(id.to_string(), false);
-        save_state(&self.store_root, &state)
+        Ok(UninstallTransaction {
+            module_id: id.clone(),
+            original_root,
+            staged_root,
+            version_root,
+            previous_state,
+            state_applied: false,
+        })
+    }
+
+    pub fn apply_uninstall(
+        &self,
+        transaction: &mut UninstallTransaction,
+    ) -> Result<(), PackageError> {
+        let mut state = transaction.previous_state.clone();
+        state
+            .modules
+            .insert(transaction.module_id.to_string(), false);
+        state.active_packages.remove(transaction.module_id.as_str());
+        state
+            .uninstalled_modules
+            .insert(transaction.module_id.to_string());
+        save_state(&self.store_root, &state)?;
+        transaction.state_applied = true;
+        Ok(())
+    }
+
+    pub fn rollback_uninstall(
+        &self,
+        transaction: &mut UninstallTransaction,
+    ) -> Result<(), PackageError> {
+        if transaction.state_applied {
+            save_state(&self.store_root, &transaction.previous_state)?;
+            transaction.state_applied = false;
+        }
+        if transaction.staged_root.exists() {
+            fs::rename(&transaction.staged_root, &transaction.original_root)
+                .map_err(PackageError::from)?;
+            sync_directory(&transaction.version_root)?;
+        }
+        Ok(())
+    }
+
+    pub fn finalize_uninstall(
+        &self,
+        transaction: &mut UninstallTransaction,
+    ) -> Result<(), PackageError> {
+        if !transaction.state_applied {
+            return Err(PackageError::AtomicUninstall {
+                detail: "cannot finalize an unapplied uninstall".to_owned(),
+            });
+        }
+        if self.uninstall_finalization_fault == Some(UninstallFinalizationFault::BeforeDelete) {
+            return Err(PackageError::AtomicUninstall {
+                detail: "injected finalization failure before package deletion".to_owned(),
+            });
+        }
+        let _ = fs::remove_dir_all(&transaction.staged_root);
+        let version_root_is_empty = transaction
+            .version_root
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if version_root_is_empty {
+            let _ = fs::remove_dir(&transaction.version_root);
+        }
+        if let Some(parent) = transaction.version_root.parent() {
+            let _ = sync_directory(parent);
+        }
+        Ok(())
     }
 
     pub(crate) fn reconstruct_registry(&self) -> Result<Vec<InstalledModule>, PackageError> {
@@ -364,6 +486,10 @@ impl PackageInstaller {
                             .file_name()
                             .to_string_lossy()
                             .starts_with(".staging-")
+                        || hash_entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".uninstall-staging-")
                     {
                         continue;
                     }
@@ -385,7 +511,9 @@ impl PackageInstaller {
                         .modules
                         .get(module_id.as_str())
                         .copied()
-                        .unwrap_or(true);
+                        .unwrap_or(true)
+                        && validate_app_version_compatibility(&manifest, &self.current_app_version)
+                            .is_ok();
                     modules.push(InstalledModule {
                         module_id: module_id.clone(),
                         module_type,
@@ -405,6 +533,66 @@ impl PackageInstaller {
                 .then_with(|| left.package_hash.cmp(&right.package_hash))
         });
         Ok(modules)
+    }
+
+    pub(crate) fn current_registry(&self) -> Result<Vec<InstalledModule>, PackageError> {
+        let modules = self.reconstruct_registry()?;
+        let mut state = load_state(&self.store_root)?;
+        let mut current = std::collections::BTreeMap::<String, InstalledModule>::new();
+        for module in modules {
+            if let Some(active) = state.active_packages.get(module.module_id.as_str()) {
+                if active.module_version == module.module_version.to_string()
+                    && active.package_hash == module.package_hash
+                {
+                    current.insert(module.module_id.to_string(), module);
+                }
+                continue;
+            }
+            if state
+                .uninstalled_modules
+                .contains(module.module_id.as_str())
+            {
+                continue;
+            }
+            current
+                .entry(module.module_id.to_string())
+                .and_modify(|existing| {
+                    if (module.module_version.clone(), module.package_hash.clone())
+                        > (
+                            existing.module_version.clone(),
+                            existing.package_hash.clone(),
+                        )
+                    {
+                        *existing = module.clone();
+                    }
+                })
+                .or_insert(module);
+        }
+        let migrations: Vec<_> = current
+            .values()
+            .filter(|module| {
+                !state
+                    .active_packages
+                    .contains_key(module.module_id.as_str())
+                    && self.installed_app_compatibility_error(module).is_none()
+            })
+            .map(|module| {
+                (
+                    module.module_id.to_string(),
+                    ActivePackage {
+                        module_version: module.module_version.to_string(),
+                        package_hash: module.package_hash.clone(),
+                    },
+                )
+            })
+            .collect();
+        if !migrations.is_empty() {
+            for (module_id, active) in migrations {
+                state.active_packages.insert(module_id, active);
+            }
+            save_state(&self.store_root, &state)?;
+        }
+        Ok(current.into_values().collect())
     }
 
     fn installed_from_inspection(
@@ -436,6 +624,40 @@ impl PackageInstaller {
             save_state(&self.store_root, &state)?;
         }
         Ok(())
+    }
+
+    fn activate_package(
+        &self,
+        module_id: &ModuleId,
+        module_version: &ContractVersion,
+        package_hash: &str,
+    ) -> Result<(), PackageError> {
+        let mut state = load_state(&self.store_root)?;
+        state.uninstalled_modules.remove(module_id.as_str());
+        state.active_packages.insert(
+            module_id.to_string(),
+            ActivePackage {
+                module_version: module_version.to_string(),
+                package_hash: package_hash.to_owned(),
+            },
+        );
+        save_state(&self.store_root, &state)
+    }
+
+    pub fn restore_active(&self, module: &InstalledModule) -> Result<(), PackageError> {
+        let mut state = load_state(&self.store_root)?;
+        state.uninstalled_modules.remove(module.module_id.as_str());
+        state
+            .modules
+            .insert(module.module_id.to_string(), module.enabled);
+        state.active_packages.insert(
+            module.module_id.to_string(),
+            ActivePackage {
+                module_version: module.module_version.to_string(),
+                package_hash: module.package_hash.clone(),
+            },
+        );
+        save_state(&self.store_root, &state)
     }
 }
 
@@ -677,6 +899,32 @@ fn validate_package_compatibility(
     }
 }
 
+fn validate_app_version_compatibility(
+    manifest: &ModuleManifest,
+    current_app_version: &Version,
+) -> Result<(), PackageError> {
+    let compatible_app_versions = manifest_compatible_app_versions(manifest);
+    let mut matches_current_version = false;
+    for declared_range in compatible_app_versions {
+        let range =
+            VersionReq::parse(declared_range).map_err(|_| PackageError::IncompatibleAppVersion)?;
+        matches_current_version |= range.matches(current_app_version);
+    }
+    if matches_current_version {
+        Ok(())
+    } else {
+        Err(PackageError::IncompatibleAppVersion)
+    }
+}
+
+fn manifest_compatible_app_versions(manifest: &ModuleManifest) -> &[String] {
+    match manifest {
+        ModuleManifest::Source(value) => &value.compatible_app_versions,
+        ModuleManifest::Dashboard(value) => &value.compatible_app_versions,
+        ModuleManifest::Locale(value) => &value.compatible_app_versions,
+    }
+}
+
 fn validate_payload_security(
     entries: &[InspectedEntry],
     module_type: ModuleType,
@@ -795,4 +1043,70 @@ fn _version_is_supported(version: &Version) -> bool {
     VersionReq::parse(HOST_API_RANGE)
         .expect("static host API range")
         .matches(version)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{manifest_compatible_app_versions, parse_manifest};
+    use mfa_contracts::ModuleManifest;
+    use serde_json::json;
+
+    #[test]
+    fn every_manifest_kind_exposes_app_compatibility_ranges() {
+        let manifests = [
+            json!({
+                "module_type": "source",
+                "module_id": "test-source",
+                "module_version": "1.0.0",
+                "package_format_version": "1.0.0",
+                "source_api_version": "1.0.0",
+                "mapping_version": "1.0.0",
+                "compatible_app_versions": [">=0.1.0"],
+                "provided_capabilities": ["body.weight"],
+                "accepted_file_patterns": ["*.csv"],
+                "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+                "extension_contracts": [],
+                "settings_schema": {},
+                "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "localization_namespace": "source.test"
+            }),
+            json!({
+                "module_type": "dashboard",
+                "module_id": "test-dashboard",
+                "module_version": "1.0.0",
+                "package_format_version": "1.0.0",
+                "dashboard_api_version": "1.0.0",
+                "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "compatible_app_versions": [">=0.1.0"],
+                "required_capabilities": [],
+                "required_extension_contracts": [],
+                "localization_namespace": "dashboard.test"
+            }),
+            json!({
+                "module_type": "locale",
+                "module_id": "test-locale",
+                "locale": "en",
+                "display_name": "Test",
+                "module_version": "1.0.0",
+                "package_format_version": "1.0.0",
+                "compatible_app_versions": [">=0.1.0"],
+                "localization_namespace": "locale.test",
+                "files": []
+            }),
+        ];
+
+        for value in manifests {
+            let manifest = parse_manifest(&value).unwrap();
+            assert!(matches!(
+                manifest,
+                ModuleManifest::Source(_)
+                    | ModuleManifest::Dashboard(_)
+                    | ModuleManifest::Locale(_)
+            ));
+            assert_eq!(
+                manifest_compatible_app_versions(&manifest),
+                &[">=0.1.0".to_owned()]
+            );
+        }
+    }
 }

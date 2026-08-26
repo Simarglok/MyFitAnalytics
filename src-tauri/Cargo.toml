@@ -16,8 +16,10 @@ mfa-contracts = { path = "../crates/mfa-contracts" }
 mfa-db = { path = "../crates/mfa-db" }
 mfa-ingestion = { path = "../crates/mfa-ingestion" }
 mfa-module-host = { path = "../crates/mfa-module-host" }
+rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+semver.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 tauri = { version = "2.11.0", features = [] }
@@ -25,3 +27,5 @@ tauri = { version = "2.11.0", features = [] }
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true
+sha2.workspace = true
+zip.workspace = true

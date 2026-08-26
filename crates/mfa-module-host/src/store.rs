@@ -1,17 +1,27 @@
 use crate::error::PackageError;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ModuleState {
     #[serde(default)]
     pub modules: BTreeMap<String, bool>,
     #[serde(default)]
+    pub active_packages: BTreeMap<String, ActivePackage>,
+    #[serde(default)]
+    pub uninstalled_modules: BTreeSet<String>,
+    #[serde(default)]
     pub bundled_catalog: BTreeMap<String, BundledCatalogEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct ActivePackage {
+    pub module_version: String,
+    pub package_hash: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

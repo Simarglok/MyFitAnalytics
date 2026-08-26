@@ -4,6 +4,7 @@
   import type { AppTransport } from './lib/transport';
   import type { BootstrapState, IngestionStatus, ModuleView } from './lib/types';
   import { message } from './lib/i18n';
+  import SettingsPage from './lib/pages/SettingsPage.svelte';
 
   export let transport: AppTransport;
 
@@ -115,5 +116,6 @@
         </ul>
       {/if}
     </section>
+    <SettingsPage {transport} />
   {/if}
 </main>

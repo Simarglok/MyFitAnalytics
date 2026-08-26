@@ -22,4 +22,5 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 wasmtime = { version = "=47.0.3", default-features = false, features = ["async", "component-model", "component-model-async", "cranelift", "runtime"] }
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 tempfile = "3"
+rfd = "0.17.2"
 wasmparser = { version = "=0.252.0", features = ["component-model"] }

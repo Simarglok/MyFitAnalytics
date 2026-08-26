@@ -104,6 +104,10 @@ impl DatabaseService {
         self.capacity
     }
 
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.join_handle) as usize
+    }
+
     pub async fn execute<R, C>(&self, command: C) -> Result<R, DatabaseError>
     where
         C: IntoDatabaseCommand<R>,

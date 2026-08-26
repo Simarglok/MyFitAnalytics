@@ -2,6 +2,7 @@ import type {
   AttemptView,
   BootstrapState,
   IngestionStatus,
+  ModuleCatalogEntry,
   ModuleView,
   QualityItem,
   ScanTicket,
@@ -12,12 +13,24 @@ import type {
 export interface AppTransport {
   getBootstrapState(): Promise<BootstrapState>;
   listModules(): Promise<ModuleView[]>;
-  setWorkspaceRoot(path: string): Promise<WorkspaceView>;
   refreshNow(): Promise<ScanTicket>;
   getIngestionStatus(): Promise<IngestionStatus>;
   listQualityItems(): Promise<QualityItem[]>;
   retryAsset(assetId: string): Promise<AttemptView>;
+  listModuleCatalog?(): Promise<ModuleCatalogEntry[]>;
+  getWorkspaceView?(): Promise<WorkspaceView>;
+  chooseWorkspaceRoot?(): Promise<WorkspaceView | null>;
+  chooseAndInstallModule?(): Promise<ModuleView | null>;
+  chooseSourceInbox?(moduleId: string): Promise<WorkspaceView | null>;
+  setModuleEnabled?(moduleId: string, enabled: boolean): Promise<ModuleView>;
+  updateModule?(moduleId: string): Promise<ModuleView>;
+  uninstallModule?(moduleId: string): Promise<void>;
+  selectModuleProvider?(capability: string, moduleId: string): Promise<ProviderSelection>;
   subscribeDataChanged(listener: (event: DataChangedEvent) => void): Promise<() => void>;
+}
+
+export interface ProviderSelection {
+  activeProviders: Record<string, string>;
 }
 
 export interface SerializedCommandError {

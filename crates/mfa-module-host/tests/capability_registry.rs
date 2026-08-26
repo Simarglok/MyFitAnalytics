@@ -55,6 +55,7 @@ fn settings(provider: Option<&str>) -> AppSettings {
         locale: "en-US".to_owned(),
         workspace_root: None,
         app_data_root: None,
+        source_inbox_roots: BTreeMap::new(),
         active_providers,
     }
 }

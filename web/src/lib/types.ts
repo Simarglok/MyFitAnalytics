@@ -4,6 +4,24 @@ export interface ModuleView {
   version: string;
   enabled: boolean;
   localizationNamespace: string;
+  displayName?: string;
+  providedCapabilities?: string[];
+}
+
+export type ModuleInstallState =
+  | 'available'
+  | 'enabled'
+  | 'disabled'
+  | 'update'
+  | 'error'
+  | 'incompatible';
+
+export interface ModuleCatalogEntry {
+  module: ModuleView;
+  origin: 'bundled' | 'installed';
+  installState: ModuleInstallState;
+  availableVersion: string | null;
+  errorCode: string | null;
 }
 
 export interface BootstrapState {

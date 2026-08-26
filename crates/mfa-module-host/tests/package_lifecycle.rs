@@ -1,5 +1,6 @@
 use mfa_contracts::{ModuleId, ModuleType};
 use mfa_module_host::{InstalledModule, ModuleRegistry, PackageInstaller};
+use semver::Version;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -30,6 +31,17 @@ fn source_manifest(module_id: &str, version: &str, entry_hash: &str) -> serde_js
         "entrypoint_hash": entry_hash,
         "localization_namespace": "source.test"
     })
+}
+
+fn source_manifest_with_compatible_versions(
+    module_id: &str,
+    version: &str,
+    entry_hash: &str,
+    compatible_app_versions: &[&str],
+) -> serde_json::Value {
+    let mut manifest = source_manifest(module_id, version, entry_hash);
+    manifest["compatible_app_versions"] = json!(compatible_app_versions);
+    manifest
 }
 
 fn make_package(path: &Path, extension: &str, manifest: serde_json::Value, wasm: &[u8]) {
@@ -63,6 +75,67 @@ fn install_fixture(
 }
 
 #[test]
+fn reopened_and_refreshed_packages_reject_newer_incompatible_app_versions() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installed_under_old_app =
+        PackageInstaller::with_app_version(store.path(), Version::parse("0.1.0").unwrap());
+    let upgraded = install_fixture(
+        &installed_under_old_app,
+        &packages,
+        "upgraded-source",
+        "1.0.0",
+    );
+    let upgraded_manifest_path = upgraded.root.join("module.json");
+    let mut upgraded_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&upgraded_manifest_path).unwrap()).unwrap();
+    upgraded_manifest["compatible_app_versions"] = json!(["<2.0.0"]);
+    fs::write(
+        &upgraded_manifest_path,
+        serde_json::to_vec(&upgraded_manifest).unwrap(),
+    )
+    .unwrap();
+    let invalid = install_fixture(
+        &installed_under_old_app,
+        &packages,
+        "invalid-installed-source",
+        "1.0.0",
+    );
+    let invalid_manifest_path = invalid.root.join("module.json");
+    let mut invalid_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&invalid_manifest_path).unwrap()).unwrap();
+    invalid_manifest["compatible_app_versions"] = json!(["not-a-semver-range"]);
+    fs::write(
+        &invalid_manifest_path,
+        serde_json::to_vec(&invalid_manifest).unwrap(),
+    )
+    .unwrap();
+
+    let reopened =
+        PackageInstaller::with_app_version(store.path(), Version::parse("2.0.0").unwrap());
+    let startup = reopened.list().unwrap();
+    assert_eq!(startup.len(), 2);
+    assert!(startup.iter().all(|module| !module.enabled));
+    assert_eq!(
+        reopened
+            .set_enabled(&upgraded.module_id, true)
+            .unwrap_err()
+            .code(),
+        "incompatible_app_version"
+    );
+    assert_eq!(
+        reopened
+            .set_enabled(&invalid.module_id, true)
+            .unwrap_err()
+            .code(),
+        "incompatible_app_version"
+    );
+    let refreshed = reopened.list().unwrap();
+    assert_eq!(refreshed.len(), 2);
+    assert!(refreshed.iter().all(|module| !module.enabled));
+}
+
+#[test]
 fn install_is_content_addressed_atomic_and_idempotent() {
     let store = TempDir::new().unwrap();
     let packages = TempDir::new().unwrap();
@@ -85,6 +158,100 @@ fn install_is_content_addressed_atomic_and_idempotent() {
     assert_eq!(second.root, first.root);
     assert_eq!(installer.list().unwrap().len(), 1);
     assert!(!store.path().join("test-source/1.0.0/.staging").exists());
+}
+
+#[test]
+fn app_version_compatibility_rejects_nonmatching_and_invalid_ranges_before_install() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer =
+        PackageInstaller::with_app_version(store.path(), Version::parse("0.1.0").unwrap());
+    let wasm = b"incompatible-component";
+    let mismatch_path = packages.path().join("mismatch.mfasource");
+    make_package(
+        &mismatch_path,
+        "mfasource",
+        source_manifest_with_compatible_versions(
+            "mismatch-source",
+            "1.0.0",
+            &sha256(wasm),
+            &[">=9.0.0"],
+        ),
+        wasm,
+    );
+    assert_eq!(
+        installer.install(&mismatch_path).unwrap_err().code(),
+        "incompatible_app_version"
+    );
+
+    let invalid_path = packages.path().join("invalid-range.mfasource");
+    make_package(
+        &invalid_path,
+        "mfasource",
+        source_manifest_with_compatible_versions(
+            "invalid-range-source",
+            "1.0.0",
+            &sha256(wasm),
+            &["not-a-semver-range"],
+        ),
+        wasm,
+    );
+    assert_eq!(
+        installer.install(&invalid_path).unwrap_err().code(),
+        "incompatible_app_version"
+    );
+    assert!(!store.path().join("mismatch-source").exists());
+    assert!(!store.path().join("invalid-range-source").exists());
+}
+
+#[test]
+fn legacy_disabled_state_migrates_to_the_latest_active_package() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let old = install_fixture(&installer, &packages, "legacy-source", "1.0.0");
+    let latest = install_fixture(&installer, &packages, "legacy-source", "2.0.0");
+
+    fs::write(
+        store.path().join("state.json"),
+        serde_json::to_vec_pretty(&json!({
+            "modules": {"legacy-source": false}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let migrated = installer.list().unwrap();
+    assert_eq!(migrated.len(), 1);
+    assert_eq!(migrated[0].module_version.to_string(), "2.0.0");
+    assert!(!migrated[0].enabled);
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(store.path().join("state.json")).unwrap()).unwrap();
+    assert_eq!(
+        state["active_packages"]["legacy-source"]["module_version"],
+        "2.0.0"
+    );
+    assert_eq!(
+        state["active_packages"]["legacy-source"]["package_hash"],
+        latest.package_hash
+    );
+
+    installer
+        .set_enabled(&ModuleId::try_from("legacy-source").unwrap(), true)
+        .unwrap();
+    assert!(
+        installer
+            .resolve_active(&ModuleId::try_from("legacy-source").unwrap())
+            .is_ok()
+    );
+    installer
+        .set_enabled(&ModuleId::try_from("legacy-source").unwrap(), false)
+        .unwrap();
+    installer
+        .uninstall(&ModuleId::try_from("legacy-source").unwrap())
+        .unwrap();
+    assert!(!latest.root.exists());
+    assert!(old.root.exists());
 }
 
 #[test]
@@ -112,6 +279,14 @@ fn failed_update_keeps_old_version_and_valid_update_adds_new_version() {
     );
     assert!(old.root.exists());
     assert_eq!(installer.list().unwrap().len(), 1);
+    assert_eq!(
+        installer
+            .resolve_active(&ModuleId::try_from("test-source").unwrap())
+            .unwrap()
+            .module_version
+            .to_string(),
+        "1.0.0"
+    );
 
     let good_path = packages.path().join("test-source-2.0.0-good.mfasource");
     make_package(
@@ -123,7 +298,11 @@ fn failed_update_keeps_old_version_and_valid_update_adds_new_version() {
     let new = installer.install(&good_path).unwrap();
     assert!(old.root.exists());
     assert!(new.root.exists());
-    assert_eq!(installer.list().unwrap().len(), 2);
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert_eq!(
+        installer.list().unwrap()[0].module_version.to_string(),
+        "2.0.0"
+    );
 }
 
 #[test]
@@ -133,6 +312,17 @@ fn disable_persists_without_deleting_bytes_and_uninstall_selects_latest_package(
     let installer = PackageInstaller::new(store.path());
     let old = install_fixture(&installer, &packages, "test-source", "1.0.0");
     let new = install_fixture(&installer, &packages, "test-source", "2.0.0");
+    let current = installer.list().unwrap();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].module_version.to_string(), "2.0.0");
+    assert_eq!(
+        installer
+            .resolve_active(&ModuleId::try_from("test-source").unwrap())
+            .unwrap()
+            .module_version
+            .to_string(),
+        "2.0.0"
+    );
 
     installer
         .set_enabled(&ModuleId::try_from("test-source").unwrap(), false)
@@ -154,6 +344,14 @@ fn disable_persists_without_deleting_bytes_and_uninstall_selects_latest_package(
         .unwrap();
     assert!(!new.root.exists());
     assert!(old.root.exists());
+    assert!(installer.list().unwrap().is_empty());
+    assert_eq!(
+        installer
+            .set_enabled(&ModuleId::try_from("test-source").unwrap(), true)
+            .unwrap_err()
+            .code(),
+        "module_not_found"
+    );
 }
 
 #[test]

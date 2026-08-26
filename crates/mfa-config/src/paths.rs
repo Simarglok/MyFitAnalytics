@@ -1,4 +1,5 @@
 use mfa_contracts::ModuleId;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
@@ -53,15 +54,32 @@ impl AppPaths {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspacePaths {
     pub root: PathBuf,
+    source_inbox_roots: BTreeMap<ModuleId, PathBuf>,
 }
 
 impl WorkspacePaths {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            source_inbox_roots: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_source_inbox_roots(
+        root: impl Into<PathBuf>,
+        source_inbox_roots: BTreeMap<ModuleId, PathBuf>,
+    ) -> Self {
+        Self {
+            root: root.into(),
+            source_inbox_roots,
+        }
     }
 
     pub fn source_inbox(&self, source: &ModuleId) -> PathBuf {
-        self.root.join("inbox").join(source.as_str())
+        self.source_inbox_roots
+            .get(source)
+            .cloned()
+            .unwrap_or_else(|| self.root.join("inbox").join(source.as_str()))
     }
 
     pub fn source_archive(&self, source: &ModuleId) -> PathBuf {

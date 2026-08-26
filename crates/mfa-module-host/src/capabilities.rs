@@ -80,6 +80,42 @@ impl CapabilityRegistry {
         Ok(ProviderResolution { active_providers })
     }
 
+    pub fn resolve_runtime(
+        &self,
+        modules: &[crate::InstalledModule],
+        settings: &AppSettings,
+    ) -> Result<ProviderResolution, CapabilityError> {
+        let mut active_providers = BTreeMap::new();
+        for (capability, module_id) in &settings.active_providers {
+            let module = modules
+                .iter()
+                .find(|module| &module.module_id == module_id)
+                .ok_or_else(|| CapabilityError::MissingProvider {
+                    module_id: module_id.clone(),
+                })?;
+            if !module.enabled {
+                continue;
+            }
+            if module.module_type != ModuleType::Source {
+                return Err(CapabilityError::WrongModuleType {
+                    capability: capability.clone(),
+                });
+            }
+            let offered = match &module.manifest {
+                ModuleManifest::Source(manifest) => &manifest.provided_capabilities,
+                _ => unreachable!("module type was checked above"),
+            };
+            if !offered.contains(capability) {
+                return Err(CapabilityError::CapabilityNotOffered {
+                    module_id: module_id.clone(),
+                    capability: capability.clone(),
+                });
+            }
+            active_providers.insert(capability.clone(), module_id.clone());
+        }
+        Ok(ProviderResolution { active_providers })
+    }
+
     pub fn apply_bundled_defaults(
         &self,
         modules: &[crate::InstalledModule],
@@ -103,7 +139,7 @@ impl CapabilityRegistry {
                 candidate.active_providers.insert(capability, module_id);
             }
         }
-        let resolution = self.resolve(modules, &candidate)?;
+        let resolution = self.resolve_runtime(modules, &candidate)?;
         *settings = candidate;
         Ok(resolution)
     }
