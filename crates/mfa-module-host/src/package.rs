@@ -25,14 +25,14 @@ const DEFAULT_MAX_UNCOMPRESSED_BYTES: u64 = 67_108_864;
 const ENTRYPOINT_NAME: &str = "module.wasm";
 const HOST_API_RANGE: &str = ">=1.0.0, <2.0.0";
 
-#[cfg(any(test, debug_assertions, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 macro_rules! uninstall_fault {
     ($installer:expr, $point:expr) => {
         $installer.check_uninstall_fault($point)
     };
 }
 
-#[cfg(not(any(test, debug_assertions, feature = "test-support")))]
+#[cfg(not(any(test, feature = "test-support")))]
 macro_rules! uninstall_fault {
     ($installer:expr, $point:expr) => {{
         let _ = &$installer;
@@ -97,7 +97,7 @@ pub struct UninstallTransaction {
     state_applied: bool,
 }
 
-#[cfg(any(test, debug_assertions, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UninstallFinalizationFault {
     BeforeDelete,
@@ -367,7 +367,7 @@ pub struct PackageInstaller {
     max_uncompressed_bytes: u64,
     host_api_range: VersionReq,
     current_app_version: Version,
-    #[cfg(any(test, debug_assertions, feature = "test-support"))]
+    #[cfg(any(test, feature = "test-support"))]
     uninstall_finalization_fault: Option<UninstallFinalizationFault>,
 }
 
@@ -385,7 +385,7 @@ impl PackageInstaller {
             max_uncompressed_bytes: DEFAULT_MAX_UNCOMPRESSED_BYTES,
             host_api_range: VersionReq::parse(HOST_API_RANGE).expect("static host API range"),
             current_app_version,
-            #[cfg(any(test, debug_assertions, feature = "test-support"))]
+            #[cfg(any(test, feature = "test-support"))]
             uninstall_finalization_fault: None,
         }
     }
@@ -395,7 +395,7 @@ impl PackageInstaller {
         self
     }
 
-    #[cfg(any(test, debug_assertions, feature = "test-support"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_uninstall_finalization_fault(mut self, fault: UninstallFinalizationFault) -> Self {
         self.uninstall_finalization_fault = Some(fault);
         self
@@ -857,7 +857,7 @@ impl PackageInstaller {
         }
     }
 
-    #[cfg(any(test, debug_assertions, feature = "test-support"))]
+    #[cfg(any(test, feature = "test-support"))]
     fn check_uninstall_fault(&self, point: UninstallFinalizationFault) -> Result<(), PackageError> {
         if self.uninstall_finalization_fault == Some(point) {
             return Err(PackageError::AtomicUninstall {

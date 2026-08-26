@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 build = "build.rs"
 
+[features]
+test-support = ["mfa-module-host/test-support"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 
