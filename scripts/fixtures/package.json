@@ -1,0 +1,13 @@
+{
+  "name": "@myfitanalytics/source-fixtures",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build_mynetdiary_fixtures.mjs",
+    "verify": "node verify_fixture_privacy.mjs"
+  },
+  "dependencies": {
+    "xlsx": "0.18.5"
+  },
+  "packageManager": "pnpm@11.23.0"
+}

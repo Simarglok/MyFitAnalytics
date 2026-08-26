@@ -2715,6 +2715,7 @@ dependencies = [
  "mfa-db",
  "mfa-ingestion",
  "mfa-module-host",
+ "serde_json",
  "tempfile",
  "tokio",
  "uuid",
@@ -2737,6 +2738,32 @@ dependencies = [
  "uuid",
  "wasmtime",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "mfa-source-contract-tests"
+version = "0.1.0"
+dependencies = [
+ "mfa-contracts",
+ "mfa-module-host",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "wasmparser",
+]
+
+[[package]]
+name = "mfa-source-sdk"
+version = "0.1.0"
+dependencies = [
+ "mfa-contracts",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -70,7 +70,7 @@ async fn registration_failure_keeps_archive_for_a_later_retry() {
     assert_eq!(inventory.assets.len(), 1);
     let active = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();
@@ -81,7 +81,7 @@ async fn registration_failure_keeps_archive_for_a_later_retry() {
     assert!(!source_path.exists());
     let active = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();
@@ -154,7 +154,7 @@ async fn canonical_transaction_failure_retries_a_registered_asset_after_archive_
     coordinator.request_scan(request()).await.unwrap();
     let active = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();

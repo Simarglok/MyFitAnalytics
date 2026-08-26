@@ -24,6 +24,9 @@ fn source_manifest(module_id: &str, version: &str, entry_hash: &str) -> serde_js
         "compatible_app_versions": [">=0.1.0"],
         "provided_capabilities": ["body.weight"],
         "accepted_file_patterns": ["*.csv"],
+        "artifact_signatures": [entry_hash],
+        "extension_contracts": [],
+        "settings_schema": {},
         "entrypoint_hash": entry_hash,
         "localization_namespace": "source.test"
     })

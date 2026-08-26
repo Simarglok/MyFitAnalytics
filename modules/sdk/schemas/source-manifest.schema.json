@@ -14,6 +14,9 @@
     "compatible_app_versions",
     "provided_capabilities",
     "accepted_file_patterns",
+    "artifact_signatures",
+    "extension_contracts",
+    "settings_schema",
     "entrypoint_hash",
     "localization_namespace"
   ],
@@ -39,12 +42,32 @@
       "minItems": 1,
       "items": { "type": "string", "minLength": 1 }
     },
+    "artifact_signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "extension_contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/extension_contract" }
+    },
+    "settings_schema": { "type": "object" },
     "entrypoint_hash": { "type": "string", "pattern": "^sha256:[A-Fa-f0-9]+$" },
     "localization_namespace": { "$ref": "#/$defs/namespace" }
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
-    "namespace": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+    "namespace": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "extension_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "contract_version", "payload_schema"],
+      "properties": {
+        "namespace": { "$ref": "#/$defs/namespace" },
+        "contract_version": { "$ref": "#/$defs/version" },
+        "payload_schema": { "type": "object" }
+      }
+    }
   }
 }

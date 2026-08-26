@@ -110,6 +110,40 @@ impl ComponentRuntime {
         .await
     }
 
+    pub async fn probe_source(
+        &self,
+        module: &InstalledModule,
+        asset: Arc<dyn ReadOnlyAsset>,
+        limits: RuntimeLimits,
+    ) -> Result<u8, RuntimeError> {
+        let component = self.load_component(module, true)?;
+        let engine = self.inner.engine.clone();
+        let timeout = limits.timeout;
+        with_timeout(
+            engine,
+            timeout,
+            source_runtime::probe(&self.inner.engine, &component, module, asset, limits),
+        )
+        .await
+    }
+
+    pub async fn validate_source(
+        &self,
+        module: &InstalledModule,
+        asset: Arc<dyn ReadOnlyAsset>,
+        limits: RuntimeLimits,
+    ) -> Result<mfa_contracts::SourceValidation, RuntimeError> {
+        let component = self.load_component(module, true)?;
+        let engine = self.inner.engine.clone();
+        let timeout = limits.timeout;
+        with_timeout(
+            engine,
+            timeout,
+            source_runtime::validate(&self.inner.engine, &component, module, asset, limits),
+        )
+        .await
+    }
+
     pub async fn invoke_dashboard(
         &self,
         module: &InstalledModule,

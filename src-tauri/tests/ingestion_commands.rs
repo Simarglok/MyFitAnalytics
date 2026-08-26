@@ -26,6 +26,9 @@ fn state() -> (myfitanalytics::AppState, TempDir, std::path::PathBuf) {
           "compatible_app_versions":[">=0.1.0"],
           "provided_capabilities":["body.weight"],
           "accepted_file_patterns":["*.json"],
+          "artifact_signatures":["sha256:embedded"],
+          "extension_contracts":[],
+          "settings_schema":{},
           "entrypoint_hash":"sha256:embedded",
           "localization_namespace":"source.bundled"
         }"#,
@@ -67,6 +70,9 @@ fn two_source_state() -> (myfitanalytics::AppState, TempDir) {
                   "compatible_app_versions":[">=0.1.0"],
                   "provided_capabilities":["{capability}"],
                   "accepted_file_patterns":["*.json"],
+                  "artifact_signatures":["sha256:embedded"],
+                  "extension_contracts":[],
+                  "settings_schema":{{}},
                   "entrypoint_hash":"sha256:embedded",
                   "localization_namespace":"{namespace}"
                 }}"#
@@ -103,7 +109,10 @@ fn event_state() -> (myfitanalytics::AppState, TempDir) {
           "compatible_app_versions":[">=0.1.0"],
           "provided_capabilities":["body.weight"],
           "accepted_file_patterns":["*.fixture"],
-          "entrypoint_hash":"sha256:c6e2e79b27db7a63384729bc6b723925911ea550ecf9b393e5245175702e72b9",
+          "artifact_signatures":["sha256:aa2003b68f1ebbd7d8c22f0d41d93b6e6c6d4c71e9b8b2d46e8ed8dfa9db57c1"],
+          "extension_contracts":[],
+          "settings_schema":{},
+          "entrypoint_hash":"sha256:aa2003b68f1ebbd7d8c22f0d41d93b6e6c6d4c71e9b8b2d46e8ed8dfa9db57c1",
           "localization_namespace":"source.guest"
         }"#,
     )

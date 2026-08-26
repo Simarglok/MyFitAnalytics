@@ -1,0 +1,41 @@
+{
+  "generator": "synthetic-mynetdiary-fixtures",
+  "format": "BIFF8/CDFV2",
+  "files": [
+    {
+      "file": "valid-full.xls",
+      "scenario": "all required sheets and optional sheets",
+      "sha256": "527aca16e8f7562ff1c6766dd1cb00aa32592793c0104e344267c12bb619c1c3"
+    },
+    {
+      "file": "missing-required-sheet.xls",
+      "scenario": "Exercise sheet omitted",
+      "sha256": "ba9e8bfbb12fa7618eb4a4d9c9032d2c5e915ef286b81852954d175979f2e4b7"
+    },
+    {
+      "file": "optional-sheets-absent.xls",
+      "scenario": "Trackers and Water Glasses omitted",
+      "sha256": "c0d77856dd98c6d88da6191c84d552b466b27354aa786ddf7a9814b804fc3245"
+    },
+    {
+      "file": "schema-drift.xls",
+      "scenario": "required Food column renamed",
+      "sha256": "14f133db36f62c6dfa1757fee7f201d42c74b79c1e4b850d79fffa3458753def"
+    },
+    {
+      "file": "mixed-year.xls",
+      "scenario": "dates span two calendar years",
+      "sha256": "02648ad362df9ba789440f69a35b4f059583d92a1eab76ce37858d84ef606949"
+    },
+    {
+      "file": "unknown-activity.xls",
+      "scenario": "governed activity name is unknown",
+      "sha256": "0307feadcd42a22010b8fafa4fd74abd32e928ddfe76134162f3b1dbb23d6d2f"
+    },
+    {
+      "file": "decimal-comma-nbsp.xls",
+      "scenario": "decimal comma and NBSP numeric text",
+      "sha256": "f17fdc4df36c8f5bab1daee17509531d421986d543186cd3434dc7b24781a0f6"
+    }
+  ]
+}

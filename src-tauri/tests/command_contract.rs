@@ -31,6 +31,9 @@ fn state() -> (myfitanalytics::AppState, TempDir) {
           "compatible_app_versions":[">=0.1.0"],
           "provided_capabilities":["body.weight"],
           "accepted_file_patterns":["*.json"],
+          "artifact_signatures":["sha256:embedded"],
+          "extension_contracts":[],
+          "settings_schema":{},
           "entrypoint_hash":"sha256:embedded",
           "localization_namespace":"source.bundled"
         }"#,

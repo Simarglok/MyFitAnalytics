@@ -1,0 +1,14 @@
+{
+  "generator": "synthetic-hevy-fixtures",
+  "format": "UTF-8 comma CSV",
+  "files": [
+    {
+      "file": "measurement_data.csv",
+      "sha256": "c7663e7eab30010351cb0e3046d378c767adb7b15f5422ac76fb7d1c96ba11ec"
+    },
+    {
+      "file": "workout_data.csv",
+      "sha256": "4501e7314b1f712c7f42be0d97205b1c5f7104d7f9ac960bfe7cb31695d1983a"
+    }
+  ]
+}

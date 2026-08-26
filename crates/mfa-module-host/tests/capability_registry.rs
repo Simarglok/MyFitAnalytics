@@ -24,6 +24,9 @@ fn source_module(
         "compatible_app_versions": [">=0.1.0"],
         "provided_capabilities": [capability],
         "accepted_file_patterns": ["*.json"],
+        "artifact_signatures": ["sha256:fixture"],
+        "extension_contracts": [],
+        "settings_schema": {},
         "entrypoint_hash": "sha256:fixture",
         "localization_namespace": id
     }))

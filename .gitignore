@@ -20,3 +20,5 @@
 *.mfalocale
 !crates/mfa-module-host/tests/fixtures/
 !crates/mfa-module-host/tests/fixtures/*.mfasource
+!crates/mfa-source-contract-tests/tests/fixtures/
+!crates/mfa-source-contract-tests/tests/fixtures/*.mfasource

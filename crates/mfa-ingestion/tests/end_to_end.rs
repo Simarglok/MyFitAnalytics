@@ -125,7 +125,7 @@ async fn successful_asset_follows_archive_parse_commit_and_data_changed_order() 
     assert!(!inbox.join("export.fixture").exists());
     let view = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();
@@ -313,6 +313,9 @@ async fn extension_contract_registration_failure_marks_attempt_failed_immediatel
         namespace: "fixture.extension".to_owned(),
         contract_version: "1.0.0".parse().unwrap(),
         record_type: "fixture.record".to_owned(),
+        source_record_key: "source-1".to_owned(),
+        occurred_local_at: None,
+        local_date: None,
         payload: serde_json::json!({"value": 1}),
     });
     let temp = TempDir::new().unwrap();

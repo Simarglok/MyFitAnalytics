@@ -130,11 +130,38 @@ pub struct ExtensionRecord {
     pub namespace: String,
     pub contract_version: ContractVersion,
     pub record_type: String,
+    pub source_record_key: String,
+    pub occurred_local_at: Option<LocalDateTime>,
+    pub local_date: Option<LocalDate>,
     pub payload: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceRecord {
+    pub source_record_key: String,
+    pub sheet_name: Option<String>,
+    pub source_row_number: u32,
+    pub raw_payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineageHook {
+    pub canonical_entity_type: String,
+    pub canonical_entity_id: String,
+    pub source_record_key: String,
+    pub mapping_version: ContractVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceBatch {
+    pub contract_version: ContractVersion,
+    pub source_module_id: String,
+    pub source_api_version: ContractVersion,
+    pub mapping_version: ContractVersion,
+    pub schema_fingerprint: String,
+    pub logical_snapshot_key: String,
+    pub source_records: Vec<SourceRecord>,
+    pub lineage: Vec<LineageHook>,
     pub records: Vec<CanonicalObservation>,
     pub extensions: Vec<ExtensionRecord>,
     pub issues: Vec<MappingIssue>,
@@ -144,7 +171,10 @@ pub struct SourceBatch {
 pub struct SourceDescriptor {
     pub module_id: String,
     pub module_version: ContractVersion,
+    pub source_api_version: ContractVersion,
+    pub mapping_version: ContractVersion,
     pub provided_capabilities: Vec<CapabilityId>,
+    pub extension_contracts: Vec<ExtensionRequirement>,
     pub localization_namespace: String,
 }
 
@@ -152,6 +182,11 @@ pub struct SourceDescriptor {
 pub struct SourceValidation {
     pub valid: bool,
     pub issues: Vec<MappingIssue>,
+    pub source_module_id: String,
+    pub source_api_version: ContractVersion,
+    pub logical_snapshot_key: String,
+    pub schema_fingerprint: String,
+    pub mapping_version: ContractVersion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

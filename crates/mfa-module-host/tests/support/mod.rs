@@ -87,6 +87,9 @@ pub fn source_module_with_declared_hash(
             "compatible_app_versions": [">=0.1.0"],
             "provided_capabilities": capabilities,
             "accepted_file_patterns": ["*.fixture"],
+            "artifact_signatures": [declared_hash.unwrap_or("sha256:placeholder")],
+            "extension_contracts": [],
+            "settings_schema": {},
             "entrypoint_hash": declared_hash.unwrap_or("sha256:placeholder"),
             "localization_namespace": "source.guest"
         }),
