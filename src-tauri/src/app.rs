@@ -152,16 +152,17 @@ mod tests {
     }
 
     #[test]
-    fn tauri_bundles_source_packages_under_the_runtime_modules_directory() {
+    fn tauri_bundles_only_the_production_source_packages() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let resources = config["bundle"]["resources"]
             .as_object()
-            .expect("bundled source packages must declare an explicit target directory");
-
-        assert_eq!(
-            resources.get("../dist/modules/*.mfasource"),
-            Some(&Value::String("modules/".to_owned()))
-        );
+            .expect("bundled source packages must declare an explicit allowlist");
+        let expected = serde_json::json!({
+            "../dist/modules/mynetdiary.mfasource": "modules/mynetdiary.mfasource",
+            "../dist/modules/hevy.mfasource": "modules/hevy.mfasource"
+        });
+        assert_eq!(resources, expected.as_object().unwrap());
+        assert!(!resources.keys().any(|path| path.contains('*')));
     }
 
     #[test]

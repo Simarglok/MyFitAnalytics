@@ -13,6 +13,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist" / "modules"
+EXPECTED_PACKAGES = {"mynetdiary.mfasource", "hevy.mfasource"}
 FORBIDDEN = (b"wasi:", b"duckdb", b"raw-sql", b"credentials")
 
 
@@ -22,6 +23,15 @@ def digest(data: bytes) -> str:
 
 def build() -> None:
     subprocess.run(["bash", str(ROOT / "scripts" / "build-module-packages.sh")], cwd=ROOT, check=True)
+
+
+def verify_production_layout() -> None:
+    actual = {path.name for path in DIST.glob("*.mfasource")}
+    if actual != EXPECTED_PACKAGES:
+        raise SystemExit(
+            f"production module package layout mismatch: expected {sorted(EXPECTED_PACKAGES)}, "
+            f"found {sorted(actual)}"
+        )
 
 
 def verify_package(path: Path) -> str:
@@ -55,9 +65,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="mfa-package-verify-") as directory:
         first = Path(directory)
         build()
+        verify_production_layout()
         for module in ("mynetdiary", "hevy"):
             shutil.copy2(DIST / f"{module}.mfasource", first / f"{module}.mfasource")
         build()
+        verify_production_layout()
         for module in ("mynetdiary", "hevy"):
             package = DIST / f"{module}.mfasource"
             if package.read_bytes() != (first / package.name).read_bytes():

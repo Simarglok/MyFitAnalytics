@@ -30,7 +30,8 @@
       "signingIdentity": "-"
     },
     "resources": {
-      "../dist/modules/*.mfasource": "modules/"
+      "../dist/modules/mynetdiary.mfasource": "modules/mynetdiary.mfasource",
+      "../dist/modules/hevy.mfasource": "modules/hevy.mfasource"
     }
   }
 }
