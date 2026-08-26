@@ -87,10 +87,10 @@ pub fn source_module_with_declared_hash(
             "compatible_app_versions": [">=0.1.0"],
             "provided_capabilities": capabilities,
             "accepted_file_patterns": ["*.fixture"],
-            "artifact_signatures": [declared_hash.unwrap_or("sha256:placeholder")],
+            "artifact_signatures": [],
             "extension_contracts": [],
             "settings_schema": {},
-            "entrypoint_hash": declared_hash.unwrap_or("sha256:placeholder"),
+            "entrypoint_hash": declared_hash.unwrap_or_default(),
             "localization_namespace": "source.guest"
         }),
         declared_hash,
@@ -130,8 +130,13 @@ fn installed_module(
     let bytes = fs::read(fixture_path(fixture)).unwrap();
     let package_hash = format!("{:x}", Sha256::digest(&bytes));
     let mut manifest_value = manifest_value;
-    if declared_hash.is_none() && manifest_value.get("entrypoint_hash").is_some() {
-        manifest_value["entrypoint_hash"] = json!(format!("sha256:{package_hash}"));
+    if declared_hash.is_none() {
+        if manifest_value.get("artifact_signatures").is_some() {
+            manifest_value["artifact_signatures"] = json!([format!("sha256:{package_hash}")]);
+        }
+        if manifest_value.get("entrypoint_hash").is_some() {
+            manifest_value["entrypoint_hash"] = json!(format!("sha256:{package_hash}"));
+        }
     }
     let root = store.path().join(module_id);
     fs::create_dir_all(&root).unwrap();
