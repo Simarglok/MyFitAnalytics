@@ -151,11 +151,10 @@ git commit -m "feat: refresh inboxes in the background"
 
 ---
 
-### Task 3: Add directory/module pickers, recovery mode, rebuild confirmation, and diagnostics
+### Task 3: Add recovery mode, rebuild confirmation, and diagnostics
 
 **Files:**
 
-- Create: `src-tauri/src/dialogs.rs`
 - Create: `src-tauri/src/diagnostics.rs`
 - Modify: `src-tauri/src/commands.rs`
 - Modify: `src-tauri/capabilities/default.json`
@@ -169,8 +168,6 @@ git commit -m "feat: refresh inboxes in the background"
 **Interfaces:**
 
 ```rust
-#[tauri::command] async fn choose_workspace_root(window: Window, state: State<'_, AppState>) -> Result<Option<WorkspaceView>, CommandError>;
-#[tauri::command] async fn choose_and_install_module(window: Window, state: State<'_, AppState>) -> Result<Option<ModuleView>, CommandError>;
 #[tauri::command] async fn get_diagnostics(state: State<'_, AppState>) -> Result<DiagnosticsView, CommandError>;
 #[tauri::command] async fn preflight_rebuild(state: State<'_, AppState>) -> Result<RebuildPlanView, CommandError>;
 #[tauri::command] async fn rebuild_database(confirmation_token: String, state: State<'_, AppState>) -> Result<RebuildResultView, CommandError>;
@@ -178,7 +175,7 @@ git commit -m "feat: refresh inboxes in the background"
 
 **Step 1: Write failing native-command tests**
 
-Use a mock dialog port. Assert workspace picker accepts directories only; module picker filters `.mfasource`, `.mfadashboard`, `.mfalocale`; cancellation is not an error; recovery mode rejects refresh/import but permits settings, diagnostics, archive inspection metadata, and rebuild preflight.
+Reuse the workspace and module picker commands delivered by the Bundled Source Modules plan. Assert recovery mode rejects refresh/import but permits Settings, diagnostics, archive inspection metadata, and rebuild preflight; the existing pickers remain reachable and preserve their cancellation and package-filter behavior.
 
 Run: `cargo test -p myfitanalytics --test recovery_commands`
 
@@ -192,9 +189,9 @@ Run: `pnpm --dir web test -- --run RecoveryPage DiagnosticsPage`
 
 Expected: FAIL.
 
-**Step 3: Implement pickers and recovery UI**
+**Step 3: Implement recovery and diagnostics UI**
 
-Use the Tauri dialog plugin from Rust commands so arbitrary web content cannot invoke unrestricted filesystem access. Bind confirmation tokens to the current rebuild plan digest and expire them after one use or configuration change. Stream progress as typed stage/percentage events without row data.
+Bind confirmation tokens to the current rebuild plan digest and expire them after one use or configuration change. Stream progress as typed stage/percentage events without row data. Extend the existing Settings page and dialog abstraction rather than introducing a second filesystem-selection path.
 
 **Step 4: Run and commit**
 
@@ -202,7 +199,7 @@ Use the Tauri dialog plugin from Rust commands so arbitrary web content cannot i
 cargo test -p myfitanalytics --test recovery_commands
 pnpm --dir web test -- --run RecoveryPage DiagnosticsPage
 git add src-tauri web
-git commit -m "feat: add recovery and native settings dialogs"
+git commit -m "feat: add recovery and diagnostics settings"
 ```
 
 ---
