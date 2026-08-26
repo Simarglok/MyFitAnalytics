@@ -28,6 +28,8 @@ uuid.workspace = true
 tauri = { version = "2.11.0", features = [] }
 
 [dev-dependencies]
+mfa-module-host = { path = "../crates/mfa-module-host", features = ["test-support"] }
+myfitanalytics = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tokio.workspace = true
 sha2.workspace = true

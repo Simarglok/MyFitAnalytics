@@ -23,4 +23,5 @@ wasmtime.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+mfa-module-host = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
