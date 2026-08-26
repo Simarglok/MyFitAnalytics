@@ -98,6 +98,10 @@ pub fn source_module_with_declared_hash(
 }
 
 pub fn dashboard_module(store: &TempDir, fixture: &str) -> InstalledModule {
+    let fixture_hash = format!(
+        "sha256:{:x}",
+        Sha256::digest(fs::read(fixture_path(fixture)).unwrap())
+    );
     installed_module(
         store,
         fixture,
@@ -109,7 +113,7 @@ pub fn dashboard_module(store: &TempDir, fixture: &str) -> InstalledModule {
             "module_version": "1.0.0",
             "package_format_version": "1.0.0",
             "dashboard_api_version": "1.0.0",
-            "entrypoint_hash": "sha256:placeholder",
+            "entrypoint_hash": fixture_hash,
             "compatible_app_versions": [">=0.1.0"],
             "required_capabilities": [{"capability": "body.weight"}],
             "required_extension_contracts": [],
