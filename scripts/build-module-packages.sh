@@ -24,5 +24,9 @@ fi
 for module in mynetdiary hevy; do
   cargo component build --manifest-path "$ROOT/modules/sources/$module/Cargo.toml" \
     --release --target wasm32-unknown-unknown
-  printf 'built %s\n' "$module"
+  python3 "$ROOT/modules/sdk/tools/build_mfasource.py" \
+    --wasm "$ROOT/target/wasm32-unknown-unknown/release/mfa_source_${module}.wasm" \
+    --module-dir "$ROOT/modules/sources/$module" \
+    --output "$DIST/${module}.mfasource"
+  printf 'built %s.mfasource\n' "$module"
 done

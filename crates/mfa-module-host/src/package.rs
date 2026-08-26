@@ -1,5 +1,5 @@
 use crate::error::PackageError;
-use crate::store::{load_state, save_state, sync_directory};
+use crate::store::{BundledCatalogEntry, load_state, save_state, sync_directory};
 use jsonschema::validator_for;
 use mfa_contracts::{
     ContractVersion, DashboardManifest, LocaleManifest, ModuleId, ModuleManifest, ModuleType,
@@ -50,6 +50,19 @@ pub struct InstalledModule {
     pub root: PathBuf,
     pub enabled: bool,
     pub manifest: ModuleManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundledPackageInfo {
+    pub module_id: ModuleId,
+    pub module_version: ContractVersion,
+    pub package_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundledModuleUpdate {
+    pub available: BundledPackageInfo,
+    pub installed: Option<BundledPackageInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +213,83 @@ impl PackageInstaller {
         self.installed_from_inspection(&inspected, final_root)
     }
 
+    pub fn install_bundled_defaults(
+        &self,
+        packages: &[PathBuf],
+    ) -> Result<Vec<BundledPackageInfo>, PackageError> {
+        let inspected = packages
+            .iter()
+            .map(|package| self.inspect(package).map(|value| (package, value)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut state = load_state(&self.store_root)?;
+        for (_, package) in &inspected {
+            let (module_id, module_version, _) = manifest_identity(&package.manifest);
+            state.bundled_catalog.insert(
+                module_id.to_string(),
+                BundledCatalogEntry {
+                    module_version: module_version.to_string(),
+                    package_hash: package.package_hash.clone(),
+                },
+            );
+        }
+        save_state(&self.store_root, &state)?;
+
+        let installed = self.reconstruct_registry()?;
+        for (path, package) in inspected {
+            let (module_id, _, _) = manifest_identity(&package.manifest);
+            let explicitly_disabled = state
+                .modules
+                .get(module_id.as_str())
+                .is_some_and(|enabled| !enabled);
+            let already_installed = installed
+                .iter()
+                .any(|module| &module.module_id == module_id);
+            if !explicitly_disabled && !already_installed {
+                self.install(path)?;
+            }
+        }
+        self.bundled_catalog()
+    }
+
+    pub fn bundled_catalog(&self) -> Result<Vec<BundledPackageInfo>, PackageError> {
+        let state = load_state(&self.store_root)?;
+        state
+            .bundled_catalog
+            .into_iter()
+            .map(|(module_id, entry)| catalog_info(module_id, entry))
+            .collect()
+    }
+
+    pub fn available_bundled_updates(&self) -> Result<Vec<BundledModuleUpdate>, PackageError> {
+        let catalog = self.bundled_catalog()?;
+        let installed = self.reconstruct_registry()?;
+        Ok(catalog
+            .into_iter()
+            .filter_map(|available| {
+                let installed = installed
+                    .iter()
+                    .filter(|module| module.module_id == available.module_id)
+                    .max_by(|left, right| left.module_version.cmp(&right.module_version))
+                    .map(|module| BundledPackageInfo {
+                        module_id: module.module_id.clone(),
+                        module_version: module.module_version.clone(),
+                        package_hash: module.package_hash.clone(),
+                    });
+                if installed
+                    .as_ref()
+                    .is_some_and(|installed| installed.module_version >= available.module_version)
+                {
+                    None
+                } else {
+                    Some(BundledModuleUpdate {
+                        available,
+                        installed,
+                    })
+                }
+            })
+            .collect())
+    }
+
     pub fn set_enabled(&self, id: &ModuleId, enabled: bool) -> Result<(), PackageError> {
         if !self
             .reconstruct_registry()?
@@ -243,7 +333,9 @@ impl PackageInstaller {
         {
             let _ = fs::remove_dir(version_root);
         }
-        Ok(())
+        let mut state = load_state(&self.store_root)?;
+        state.modules.insert(id.to_string(), false);
+        save_state(&self.store_root, &state)
     }
 
     pub(crate) fn reconstruct_registry(&self) -> Result<Vec<InstalledModule>, PackageError> {
@@ -349,6 +441,25 @@ impl PackageInstaller {
 
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn catalog_info(
+    module_id: String,
+    entry: BundledCatalogEntry,
+) -> Result<BundledPackageInfo, PackageError> {
+    let module_id = ModuleId::try_from(module_id).map_err(|error| PackageError::StateInvalid {
+        detail: error.to_string(),
+    })?;
+    let module_version = ContractVersion::try_from(entry.module_version).map_err(|error| {
+        PackageError::StateInvalid {
+            detail: error.to_string(),
+        }
+    })?;
+    Ok(BundledPackageInfo {
+        module_id,
+        module_version,
+        package_hash: entry.package_hash,
+    })
 }
 
 fn prefixed_digest(bytes: &[u8]) -> String {

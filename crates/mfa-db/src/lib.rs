@@ -17,9 +17,10 @@ pub use command::{
     ArchiveAssetRecord, AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt,
     FailAttemptResult, HealthCheck, HealthCheckResult, IntoDatabaseCommand, ListQualityItems,
     ListQualityItemsResult, MarkInterrupted, MarkInterruptedResult, QueryAttempt,
-    QueryAttemptResult, QueryView, ReconcileArchive, ReconcileArchiveInventory,
+    QueryAttemptResult, QuerySnapshot, QueryView, ReconcileArchive, ReconcileArchiveInventory,
     ReconcileArchiveInventoryResult, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
-    RegisterReceipt, RegisterReceiptResult, Shutdown, StartAttempt, StartAttemptResult,
+    RegisterReceipt, RegisterReceiptResult, Shutdown, SnapshotResponse, StartAttempt,
+    StartAttemptResult,
 };
 pub use error::DatabaseError;
 pub use fault::{

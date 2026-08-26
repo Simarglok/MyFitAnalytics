@@ -1024,9 +1024,44 @@ fn build_validated_batch(
         });
     }
     let mut observations = batch.records;
+    let mut activity_day_source_dates = std::collections::HashMap::new();
+    let lineage_source_keys = batch
+        .lineage
+        .iter()
+        .map(|hook| {
+            (
+                (
+                    hook.canonical_entity_type.clone(),
+                    hook.canonical_entity_id.clone(),
+                ),
+                hook.source_record_key.clone(),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut lineage_source_keys_by_type = batch.lineage.iter().fold(
+        std::collections::HashMap::<String, std::collections::VecDeque<String>>::new(),
+        |mut grouped, hook| {
+            grouped
+                .entry(hook.canonical_entity_type.clone())
+                .or_default()
+                .push_back(hook.source_record_key.clone());
+            grouped
+        },
+    );
     for observation in &mut observations {
-        let source_record_key =
-            observation_source_id(observation).ok_or_else(|| IngestionError::AssetFailure {
+        let source_record_key = observation_source_id(observation)
+            .or_else(|| {
+                observation_entity_key(observation)
+                    .and_then(|key| lineage_source_keys.get(&key).cloned())
+            })
+            .or_else(|| {
+                observation_entity_type(observation).and_then(|entity_type| {
+                    lineage_source_keys_by_type
+                        .get_mut(&entity_type)
+                        .and_then(std::collections::VecDeque::pop_front)
+                })
+            })
+            .ok_or_else(|| IngestionError::AssetFailure {
                 code: "source_record_reference_missing".to_owned(),
                 detail: "canonical observations must reference a guest source record key"
                     .to_owned(),
@@ -1038,8 +1073,13 @@ fn build_validated_batch(
                 code: "source_record_reference_invalid".to_owned(),
                 detail: format!("unknown guest source record key {source_record_key}"),
             })?;
+        if let CanonicalObservation::ActivityDay(value) = observation {
+            activity_day_source_dates
+                .insert(source_record_id.clone(), value.local_date.to_string());
+        }
         set_observation_source_id(observation, source_record_id);
     }
+    observations = coalesce_activity_days(observations);
 
     let lineage = batch
         .lineage
@@ -1052,9 +1092,21 @@ fn build_validated_batch(
                     code: "lineage_source_record_invalid".to_owned(),
                     detail: format!("unknown guest source record key {}", hook.source_record_key),
                 })?;
+            let canonical_entity_type = match hook.canonical_entity_type.as_str() {
+                "heart_rate" => "heart_rate_observation".to_owned(),
+                _ => hook.canonical_entity_type.clone(),
+            };
+            let canonical_entity_id = if canonical_entity_type == "activity_day" {
+                activity_day_source_dates
+                    .get(&source_record_id)
+                    .cloned()
+                    .unwrap_or(hook.canonical_entity_id)
+            } else {
+                hook.canonical_entity_id
+            };
             Ok(LineageLink {
-                canonical_entity_type: hook.canonical_entity_type,
-                canonical_entity_id: hook.canonical_entity_id,
+                canonical_entity_type,
+                canonical_entity_id,
                 source_record_id,
                 mapping_version: hook.mapping_version.to_string(),
             })
@@ -1128,7 +1180,7 @@ fn extension_contracts(
             });
         }
     };
-    Ok(batch
+    batch
         .extensions
         .iter()
         .map(|extension| {
@@ -1157,7 +1209,36 @@ fn extension_contracts(
                 payload_schema: contract.payload_schema.clone(),
             })
         })
-        .collect::<Result<Vec<_>, IngestionError>>()?)
+        .collect::<Result<Vec<_>, IngestionError>>()
+}
+
+fn coalesce_activity_days(observations: Vec<CanonicalObservation>) -> Vec<CanonicalObservation> {
+    let mut result = Vec::with_capacity(observations.len());
+    let mut activity_days = std::collections::HashMap::new();
+    for observation in observations {
+        let CanonicalObservation::ActivityDay(day) = observation else {
+            result.push(observation);
+            continue;
+        };
+        if let Some(index) = activity_days.get(&day.local_date).copied() {
+            let CanonicalObservation::ActivityDay(existing) = &mut result[index] else {
+                unreachable!("activity day index points to a different observation");
+            };
+            existing.steps = existing.steps.or(day.steps);
+            existing.water_ml = match (existing.water_ml, day.water_ml) {
+                (Some(existing), Some(incoming)) => Some(existing + incoming),
+                (existing, incoming) => existing.or(incoming),
+            };
+            existing.heart_rate_observation_count += day.heart_rate_observation_count;
+            existing.activity_duration_seconds += day.activity_duration_seconds;
+            existing.activity_distance_km += day.activity_distance_km;
+            existing.estimated_activity_calories_kcal += day.estimated_activity_calories_kcal;
+        } else {
+            activity_days.insert(day.local_date, result.len());
+            result.push(CanonicalObservation::ActivityDay(day));
+        }
+    }
+    result
 }
 
 fn observation_source_id(observation: &CanonicalObservation) -> Option<String> {
@@ -1171,6 +1252,34 @@ fn observation_source_id(observation: &CanonicalObservation) -> Option<String> {
         | CanonicalObservation::WorkoutSession(_)
         | CanonicalObservation::PhaseEvent(_) => None,
     }
+}
+
+fn observation_entity_key(observation: &CanonicalObservation) -> Option<(String, String)> {
+    Some(match observation {
+        CanonicalObservation::ActivityDay(value) => {
+            ("activity_day".to_owned(), value.local_date.to_string())
+        }
+        CanonicalObservation::WorkoutSession(value) => (
+            "workout_session".to_owned(),
+            value.workout_session_id.to_string(),
+        ),
+        CanonicalObservation::PhaseEvent(value) => {
+            ("phase_event".to_owned(), value.phase_event_id.to_string())
+        }
+        _ => return None,
+    })
+}
+
+fn observation_entity_type(observation: &CanonicalObservation) -> Option<String> {
+    Some(
+        match observation {
+            CanonicalObservation::ActivityDay(_) => "activity_day",
+            CanonicalObservation::WorkoutSession(_) => "workout_session",
+            CanonicalObservation::PhaseEvent(_) => "phase_event",
+            _ => return None,
+        }
+        .to_owned(),
+    )
 }
 
 fn set_observation_source_id(observation: &mut CanonicalObservation, source_record_id: String) {

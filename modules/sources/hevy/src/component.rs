@@ -11,7 +11,7 @@ export!(Component);
 
 impl Guest for Component {
     fn metadata() -> String {
-        r#"{"module_id":"hevy","module_version":"1.0.0","source_api_version":"1.0.0","mapping_version":"1.0.0","provided_capabilities":["body.weight","body.fat_percentage","strength.sessions","strength.sets"],"extension_contracts":["hevy.body-circumference@1.0.0"],"localization_namespace":"source.hevy"}"#.to_owned()
+        r#"{"module_id":"hevy","module_version":"1.0.0","source_api_version":"1.0.0","mapping_version":"1.0.0","provided_capabilities":["body.weight","body.fat_percentage","strength.sessions","strength.sets"],"extension_contracts":[{"namespace":"hevy.body-circumference","contract_version":"1.0.0"}],"localization_namespace":"source.hevy"}"#.to_owned()
     }
 
     fn contract_version() -> String {

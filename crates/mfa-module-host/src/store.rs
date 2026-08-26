@@ -10,6 +10,14 @@ use uuid::Uuid;
 pub(crate) struct ModuleState {
     #[serde(default)]
     pub modules: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub bundled_catalog: BTreeMap<String, BundledCatalogEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct BundledCatalogEntry {
+    pub module_version: String,
+    pub package_hash: String,
 }
 
 pub(crate) fn state_path(store_root: &Path) -> PathBuf {

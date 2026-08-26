@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm --dir web dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm --dir web build",
+    "beforeBuildCommand": "bash scripts/build-module-packages.sh && pnpm --dir web build",
     "frontendDist": "../web/dist"
   },
   "app": {
@@ -25,6 +25,7 @@
     }
   },
   "bundle": {
-    "active": true
+    "active": true,
+    "resources": ["../dist/modules/*.mfasource"]
   }
 }

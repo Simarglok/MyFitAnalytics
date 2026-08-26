@@ -173,6 +173,54 @@ fn registry_reconstructs_from_manifests_without_mutable_index() {
 }
 
 #[test]
+fn bundled_catalog_installs_first_profile_defaults_and_reports_updates_without_reinstalling() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let old_wasm = b"component-bundled-source-1.0.0";
+    let old_path = packages.path().join("bundled-source-1.0.0.mfasource");
+    make_package(
+        &old_path,
+        "mfasource",
+        source_manifest("bundled-source", "1.0.0", &sha256(old_wasm)),
+        old_wasm,
+    );
+
+    let catalog = installer
+        .install_bundled_defaults(std::slice::from_ref(&old_path))
+        .unwrap();
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(installer.list().unwrap().len(), 1);
+    assert_eq!(
+        installer.list().unwrap()[0].module_version.to_string(),
+        "1.0.0"
+    );
+
+    let new_path = packages.path().join("bundled-source-2.0.0.mfasource");
+    make_package(
+        &new_path,
+        "mfasource",
+        source_manifest("bundled-source", "2.0.0", &sha256(b"new-bundled-component")),
+        b"new-bundled-component",
+    );
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new_path))
+        .unwrap();
+    let updates = installer.available_bundled_updates().unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].available.module_version.to_string(), "2.0.0");
+    assert_eq!(installer.list().unwrap().len(), 1);
+
+    installer
+        .uninstall(&ModuleId::try_from("bundled-source").unwrap())
+        .unwrap();
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new_path))
+        .unwrap();
+    assert!(installer.list().unwrap().is_empty());
+}
+
+#[test]
 fn checked_in_valid_source_fixture_is_installable() {
     let store = TempDir::new().unwrap();
     let fixture =
