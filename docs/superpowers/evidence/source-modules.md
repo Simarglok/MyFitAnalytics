@@ -2,16 +2,16 @@
 
 ## Scope and disposition
 
-This record covers the Terra High round-1 `CHANGES_REQUIRED` remediation in `/private/tmp/MyFitAnalytics-source-modules`. The implementation is **ready for Terra round 2 review**, subject to the two previously blocked external GUI gates remaining blocked by instruction. No push, PR mutation, merge, tag, release, or repository-settings change was performed.
+This record covers the Terra High round-1 and round-2 `CHANGES_REQUIRED` remediations in `/private/tmp/MyFitAnalytics-source-modules`. The final correction is **ready for Terra round 3 review**, subject to the two previously blocked external GUI gates remaining blocked by instruction. No push, PR mutation, merge, tag, release, or repository-settings change was performed.
 
 - Repository: `https://github.com/Simarglok/MyFitAnalytics.git`
 - Worktree: `/private/tmp/MyFitAnalytics-source-modules`
 - Branch: `feat/source-modules`
 - Baseline/merge-base: `5e6f3b17c25ee52905985155e442adb028fed84a`
 - Initial verified branch/origin head: `ba019d84b9bf975cefebada9d3041a4fa3ee27cb`
-- Implementation HEAD before this evidence commit: `7195f94`
+- Implementation HEAD before this evidence commit: `f2e4116`
 - Existing PR: `#4`, `main <- feat/source-modules`, Draft; intentionally preserved.
-- Terra status: round 1 was `CHANGES_REQUIRED`; this remediation is prepared for an independent round 2 review, which remains pending.
+- Terra status: round 1 and round 2 were `CHANGES_REQUIRED`; the final correction is prepared for an independent round 3 review, which remains pending.
 
 ## Historical baseline (not fresh acceptance evidence)
 
@@ -26,7 +26,7 @@ The pre-remediation record at `ba019d8` identified:
 
 Those results are retained as provenance only. The fresh results below are from the Terra remediation commits and do not retry the external GUI gates.
 
-## Terra round-1 findings and fixes
+## Terra round-1 and round-2 findings and fixes
 
 ### 1. Journal-controlled paths could escape the store
 
@@ -90,14 +90,16 @@ Regression evidence:
 Fix:
 
 - Added the explicit `test-support` Cargo feature.
-- The fault enum, installer fault field/builder/check method, crate re-export, and Tauri state setter are compiled only for `test-support`, tests, or debug assertions.
+- The fault enum, installer fault field/builder/check method, crate re-export, and Tauri state setter are compiled only for `test-support` or tests; no `debug_assertions` gate remains.
 - Production release builds without `test-support` do not contain the fault field or public fault enum/re-export.
-- Normal debug integration tests retain the existing real fault-injection coverage; no test was disabled or weakened.
+- Host and Tauri integration tests enable `test-support` explicitly; no test was disabled or weakened.
 
 Evidence:
 
 - `cargo build -p mfa-module-host --release`: **PASS, exit 0** with test-support disabled.
-- Full debug workspace tests and Tauri lifecycle tests continue to exercise all fault controls.
+- `cargo test -p mfa-module-host --features test-support --test package_lifecycle -- --test-threads=1`: **PASS, exit 0**; 26 tests.
+- `cargo test -p myfitanalytics --features test-support --test module_lifecycle_commands -- --test-threads=1`: **PASS, exit 0**; 10 tests.
+- A default-feature release consumer compile probe fails as expected when importing the fault enum; the production API is absent.
 
 ### 5. Remaining synthetic hash sentinel
 
@@ -119,6 +121,7 @@ Evidence:
 - `efead19 fix: defer committed uninstall cleanup failures`
 - `ed87c2b test: confine uninstall fault injection`
 - `7195f94 test: derive dashboard fixture hashes`
+- `f2e4116 fix: gate fault injection behind test feature`
 
 Earlier related local commits remain unchanged:
 
@@ -139,17 +142,21 @@ All focused regressions below were run from the remediation code. The earlier RE
 - Full package lifecycle after both fixes: `26 passed, 0 failed`, exit `0`.
 - Runtime contract support after fixture-hash correction: `5 passed, 0 failed`, exit `0`.
 - Tauri lifecycle command suite after fault-scope correction: `10 passed, 0 failed`, exit `0`.
+- Default-feature host lifecycle compile: RED `101` with the fault enum/builder absent; explicit `--features test-support` GREEN `0`.
+- Final correction release-surface probe: default-feature consumer compile failed as expected because `UninstallFinalizationFault` is not exported; host and Tauri release builds GREEN `0`.
 
 ## Fresh non-GUI verification matrix
 
-All commands in this section were run after the five Terra remediation commits and before this evidence commit.
+All commands in this section were run after the final Terra correction commit and before this evidence commit.
 
 ### Full Rust/workspace gates
 
-- `cargo test --workspace -- --test-threads=1` — **PASS, exit 0**; all workspace unit, integration, lifecycle, source-module, storage, security, runtime, and doc-test targets passed. The relevant final output included 26 package lifecycle tests, 7 package-security tests, 5 runtime-contract tests, 10 Tauri lifecycle-command tests, 4 MyNetDiary source integration tests, and 4 Hevy/MyNetDiary source-module gate tests.
+- `cargo test --workspace --features 'mfa-module-host/test-support,myfitanalytics/test-support' -- --test-threads=1` — **PASS, exit 0**; all workspace unit, integration, lifecycle, source-module, storage, security, runtime, and doc-test targets passed. The relevant final output included 26 package lifecycle tests, 7 package-security tests, 5 runtime-contract tests, 10 Tauri lifecycle-command tests, 4 MyNetDiary source integration tests, and 4 Hevy/MyNetDiary source-module gate tests.
 - `cargo fmt --all --check` — **PASS, exit 0**.
-- `cargo clippy --workspace --all-targets -- -D warnings` — **PASS, exit 0**.
+- `cargo clippy --workspace --lib --bins -- -D warnings` — **PASS, exit 0**; default production surface.
+- `cargo clippy --workspace --all-targets --features 'mfa-module-host/test-support,myfitanalytics/test-support' -- -D warnings` — **PASS, exit 0**; explicit test-support test surface.
 - `cargo build -p mfa-module-host --release` — **PASS, exit 0**; release configuration excludes test fault support.
+- `cargo build -p myfitanalytics --release` — **PASS, exit 0**; default production surface excludes test fault support.
 
 ### Fixtures and package artifacts
 
@@ -190,6 +197,7 @@ Fresh final artifact hashes:
 - Tracked files scanned: `232`.
 - Exact former dashboard hash-sentinel scan scoped to implementation/test files: **0 matches**.
 - Broader marker scan: **2 pre-existing plan-document prose matches**, listed above; no implementation/test marker matches.
+- `debug_assertions` scan of host and Tauri fault-gate source: **0 matches**.
 - Private-key/API-token pattern scan: **0 matches**.
 - Credential-like tracked filenames: **0 matches**.
 - `git diff --check`: **PASS, exit 0**.
@@ -219,12 +227,12 @@ These are not claimed as fresh PASS results.
 
 - The plain full Tauri app+DMG gate remains externally blocked and was intentionally not retried.
 - The native user-facing UI lifecycle remains externally blocked by missing macOS Accessibility/Assistive Access authority and was intentionally not retried.
-- Independent Terra High round-2 review is pending.
+- Independent Terra High round-3 review is pending.
 - Remote push, PR update, merge, and all other GitHub mutations were not performed.
 
 ## Remaining work
 
-1. Terra performs the independent round-2 review against this HEAD/evidence.
+1. Terra performs the independent round-3 review against this HEAD/evidence.
 2. If Terra finds no further issues, the separately authorized remote handoff can be performed by the manager; this session did not push or mutate PR #4.
 3. If external authority becomes available in a future authorized session, run the two blocked GUI gates; no product workaround is indicated by this remediation.
 
