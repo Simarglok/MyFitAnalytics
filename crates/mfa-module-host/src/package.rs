@@ -111,18 +111,88 @@ impl UninstallTransaction {
         }
     }
 
-    fn from_journal(journal: &UninstallJournal) -> Result<Self, PackageError> {
+    fn from_journal(store_root: &Path, journal: &UninstallJournal) -> Result<Self, PackageError> {
         let module_id = ModuleId::try_from(journal.module_id.as_str()).map_err(|error| {
             PackageError::StateInvalid {
                 detail: format!("uninstall journal contains an invalid module id: {error}"),
             }
         })?;
+        validate_path_component(module_id.as_str(), "module id")?;
+        let active_package = journal
+            .previous_state
+            .active_packages
+            .get(module_id.as_str())
+            .ok_or_else(|| PackageError::AtomicUninstall {
+                detail: "uninstall journal has no active package snapshot".to_owned(),
+            })?;
+        let module_version = ContractVersion::try_from(active_package.module_version.clone())
+            .map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("uninstall journal has an invalid module version: {error}"),
+            })?;
+        validate_package_hash(&active_package.package_hash)?;
+        let staged_transaction_id = transaction_id_from_path(
+            &journal.staged_root,
+            ".uninstall-staging-",
+            "uninstall staging path",
+            "",
+        )?;
+        let backup_transaction_id = transaction_id_from_path(
+            &journal.backup_path,
+            ".uninstall-backup-",
+            "uninstall backup path",
+            ".zip",
+        )?;
+        if staged_transaction_id != backup_transaction_id {
+            return Err(PackageError::AtomicUninstall {
+                detail: "uninstall journal transaction paths do not share an id".to_owned(),
+            });
+        }
+        let expected_version_root = store_root
+            .join(module_id.as_str())
+            .join(module_version.to_string());
+        let expected_original_root = expected_version_root.join(&active_package.package_hash);
+        let expected_staged_root =
+            expected_version_root.join(format!(".uninstall-staging-{staged_transaction_id}"));
+        let expected_backup_path =
+            store_root.join(format!(".uninstall-backup-{staged_transaction_id}.zip"));
+        let canonical_store_root =
+            fs::canonicalize(store_root).map_err(|error| PackageError::AtomicUninstall {
+                detail: format!("canonicalize uninstall store root failed: {error}"),
+            })?;
+        validate_transaction_path(
+            store_root,
+            &canonical_store_root,
+            &journal.original_root,
+            &expected_original_root,
+            "original package path",
+        )?;
+        validate_transaction_path(
+            store_root,
+            &canonical_store_root,
+            &journal.staged_root,
+            &expected_staged_root,
+            "staged package path",
+        )?;
+        validate_transaction_path(
+            store_root,
+            &canonical_store_root,
+            &journal.backup_path,
+            &expected_backup_path,
+            "backup package path",
+        )?;
+        validate_transaction_path(
+            store_root,
+            &canonical_store_root,
+            &journal.version_root,
+            &expected_version_root,
+            "version package path",
+        )?;
         Ok(Self {
             module_id,
-            original_root: journal.original_root.clone(),
-            staged_root: journal.staged_root.clone(),
-            backup_path: journal.backup_path.clone(),
-            version_root: journal.version_root.clone(),
+            original_root: expected_original_root,
+            staged_root: expected_staged_root,
+            backup_path: expected_backup_path,
+            version_root: expected_version_root,
             previous_state: journal.previous_state.clone(),
             phase: journal.phase,
             state_applied: matches!(
@@ -132,6 +202,144 @@ impl UninstallTransaction {
                     | UninstallPhase::Committed
             ),
         })
+    }
+}
+
+fn validate_path_component(value: &str, label: &str) -> Result<(), PackageError> {
+    let mut components = Path::new(value).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(PackageError::AtomicUninstall {
+            detail: format!("uninstall journal {label} is not a safe path component"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_package_hash(value: &str) -> Result<(), PackageError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(PackageError::AtomicUninstall {
+            detail: "uninstall journal has an invalid package hash".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn transaction_id_from_path(
+    path: &Path,
+    prefix: &str,
+    label: &str,
+    suffix: &str,
+) -> Result<Uuid, PackageError> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| PackageError::AtomicUninstall {
+            detail: format!("uninstall journal {label} has no valid filename"),
+        })?;
+    let value = name
+        .strip_prefix(prefix)
+        .and_then(|value| value.strip_suffix(suffix))
+        .ok_or_else(|| PackageError::AtomicUninstall {
+            detail: format!("uninstall journal {label} has an invalid filename"),
+        })?;
+    Uuid::parse_str(value).map_err(|error| PackageError::AtomicUninstall {
+        detail: format!("uninstall journal {label} has an invalid transaction id: {error}"),
+    })
+}
+
+fn validate_transaction_path(
+    store_root: &Path,
+    canonical_store_root: &Path,
+    actual: &Path,
+    expected: &Path,
+    label: &str,
+) -> Result<(), PackageError> {
+    if actual != expected {
+        return Err(PackageError::AtomicUninstall {
+            detail: format!("uninstall journal {label} is outside the transaction layout"),
+        });
+    }
+    ensure_no_symlink_components(store_root, actual, label)?;
+    let canonical = canonicalize_existing_ancestor(actual, label)?;
+    if !canonical.starts_with(canonical_store_root) {
+        return Err(PackageError::AtomicUninstall {
+            detail: format!("uninstall journal {label} resolves outside the store root"),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_no_symlink_components(
+    store_root: &Path,
+    path: &Path,
+    label: &str,
+) -> Result<(), PackageError> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(Path::new("/")),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                current.pop();
+            }
+            Component::Normal(name) => current.push(name),
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if current == store_root || !store_root.starts_with(&current) {
+                    return Err(PackageError::AtomicUninstall {
+                        detail: format!("uninstall journal {label} contains a symlink"),
+                    });
+                }
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(PackageError::AtomicUninstall {
+                    detail: format!("inspect uninstall journal {label} failed: {error}"),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_existing_ancestor(path: &Path, label: &str) -> Result<PathBuf, PackageError> {
+    let mut current = path.to_path_buf();
+    let mut suffix = Vec::new();
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(_) => {
+                let mut canonical =
+                    fs::canonicalize(&current).map_err(|error| PackageError::AtomicUninstall {
+                        detail: format!("canonicalize uninstall journal {label} failed: {error}"),
+                    })?;
+                for component in suffix.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let name = current
+                    .file_name()
+                    .ok_or_else(|| PackageError::AtomicUninstall {
+                        detail: format!("uninstall journal {label} has no existing ancestor"),
+                    })?
+                    .to_os_string();
+                suffix.push(name);
+                if !current.pop() {
+                    return Err(PackageError::AtomicUninstall {
+                        detail: format!("uninstall journal {label} has no existing ancestor"),
+                    });
+                }
+            }
+            Err(error) => {
+                return Err(PackageError::AtomicUninstall {
+                    detail: format!("inspect uninstall journal {label} failed: {error}"),
+                });
+            }
+        }
     }
 }
 
@@ -627,7 +835,7 @@ impl PackageInstaller {
         let Some(journal) = load_uninstall_journal(&self.store_root)? else {
             return Ok(());
         };
-        let transaction = UninstallTransaction::from_journal(&journal)?;
+        let transaction = UninstallTransaction::from_journal(&self.store_root, &journal)?;
         let backup_exists = path_exists(&transaction.backup_path)?;
         let staged_exists = path_exists(&transaction.staged_root)?;
         let original_exists = path_exists(&transaction.original_root)?;

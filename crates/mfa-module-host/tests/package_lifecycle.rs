@@ -7,11 +7,12 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+use uuid::Uuid;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 
 fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
@@ -583,6 +584,107 @@ fn corrupt_uninstall_journal_is_reported_without_panicking_during_recovery() {
 
     assert!(result.is_ok(), "corrupt journal recovery panicked");
     assert!(result.unwrap().is_err());
+}
+
+#[test]
+fn malicious_uninstall_journal_cannot_modify_external_sentinel() {
+    let store = TempDir::new().unwrap();
+    let external = TempDir::new().unwrap();
+    let module_id = "malicious-journal-source";
+    let package_hash = "a".repeat(64);
+    let transaction_id = Uuid::new_v4();
+    let external_version_root = external.path().join(module_id).join("1.0.0");
+    let external_staged_root =
+        external_version_root.join(format!(".uninstall-staging-{transaction_id}"));
+    fs::create_dir_all(&external_staged_root).unwrap();
+    let sentinel = external_staged_root.join("sentinel");
+    fs::write(&sentinel, b"do-not-touch").unwrap();
+    let external_original_root = external_version_root.join(&package_hash);
+    let external_backup_path = external
+        .path()
+        .join(format!(".uninstall-backup-{transaction_id}.zip"));
+    let journal = json!({
+        "module_id": module_id,
+        "original_root": external_original_root,
+        "staged_root": external_staged_root,
+        "backup_path": external_backup_path,
+        "version_root": external_version_root,
+        "previous_state": {
+            "modules": {module_id: false},
+            "active_packages": {
+                module_id: {
+                    "module_version": "1.0.0",
+                    "package_hash": package_hash
+                }
+            },
+            "uninstalled_modules": [],
+            "bundled_catalog": {}
+        },
+        "phase": "Prepared"
+    });
+    fs::write(
+        store.path().join(".uninstall-transaction.json"),
+        serde_json::to_vec_pretty(&journal).unwrap(),
+    )
+    .unwrap();
+
+    let result = PackageInstaller::new(store.path()).list();
+
+    assert_eq!(result.unwrap_err().code(), "atomic_uninstall_failed");
+    assert!(external_staged_root.exists());
+    assert_eq!(fs::read(&sentinel).unwrap(), b"do-not-touch");
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_uninstall_journal_path_cannot_modify_external_sentinel() {
+    let store = TempDir::new().unwrap();
+    let external = TempDir::new().unwrap();
+    let module_id = "symlinked-journal-source";
+    let package_hash = "b".repeat(64);
+    let transaction_id = Uuid::new_v4();
+    let external_module_root = external.path().join(module_id);
+    let external_version_root = external_module_root.join("1.0.0");
+    let external_staged_root =
+        external_version_root.join(format!(".uninstall-staging-{transaction_id}"));
+    fs::create_dir_all(&external_staged_root).unwrap();
+    let sentinel = external_staged_root.join("sentinel");
+    fs::write(&sentinel, b"do-not-touch").unwrap();
+    fs::create_dir_all(store.path()).unwrap();
+    symlink(&external_module_root, store.path().join(module_id)).unwrap();
+    let store_version_root = store.path().join(module_id).join("1.0.0");
+    let journal = json!({
+        "module_id": module_id,
+        "original_root": store_version_root.join(&package_hash),
+        "staged_root": store_version_root.join(format!(".uninstall-staging-{transaction_id}")),
+        "backup_path": store
+            .path()
+            .join(format!(".uninstall-backup-{transaction_id}.zip")),
+        "version_root": store_version_root,
+        "previous_state": {
+            "modules": {module_id: false},
+            "active_packages": {
+                module_id: {
+                    "module_version": "1.0.0",
+                    "package_hash": package_hash
+                }
+            },
+            "uninstalled_modules": [],
+            "bundled_catalog": {}
+        },
+        "phase": "Prepared"
+    });
+    fs::write(
+        store.path().join(".uninstall-transaction.json"),
+        serde_json::to_vec_pretty(&journal).unwrap(),
+    )
+    .unwrap();
+
+    let result = PackageInstaller::new(store.path()).list();
+
+    assert_eq!(result.unwrap_err().code(), "atomic_uninstall_failed");
+    assert!(external_staged_root.exists());
+    assert_eq!(fs::read(&sentinel).unwrap(), b"do-not-touch");
 }
 
 #[test]
