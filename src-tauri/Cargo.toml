@@ -10,12 +10,16 @@ build = "build.rs"
 tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
+mfa-archive = { path = "../crates/mfa-archive" }
 mfa-config = { path = "../crates/mfa-config" }
 mfa-contracts = { path = "../crates/mfa-contracts" }
+mfa-db = { path = "../crates/mfa-db" }
+mfa-ingestion = { path = "../crates/mfa-ingestion" }
 mfa-module-host = { path = "../crates/mfa-module-host" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 tauri = { version = "2.11.0", features = [] }
 
 [dev-dependencies]

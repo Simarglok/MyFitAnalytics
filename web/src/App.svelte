@@ -2,28 +2,33 @@
   import { onMount } from 'svelte';
   import { normalizeTransportError } from './lib/transport';
   import type { AppTransport } from './lib/transport';
-  import type { BootstrapState, ModuleView } from './lib/types';
+  import type { BootstrapState, IngestionStatus, ModuleView } from './lib/types';
   import { message } from './lib/i18n';
 
   export let transport: AppTransport;
 
   let bootstrap: BootstrapState | null = null;
   let modules: ModuleView[] = [];
+  let ingestionStatus: IngestionStatus | null = null;
   let loading = true;
   let errorCode = '';
   let errorMessage = '';
 
   onMount(() => {
     let active = true;
-    transport
-      .getBootstrapState()
-      .then((state) => {
-        if (!active) return;
-        bootstrap = state;
-        modules = state.modules;
-        loading = false;
-      })
-      .catch((error: unknown) => {
+    const loadView = async () => {
+      const [state, status] = await Promise.all([
+        transport.getBootstrapState(),
+        transport.getIngestionStatus(),
+      ]);
+      if (!active) return;
+      bootstrap = state;
+      modules = state.modules;
+      ingestionStatus = status;
+      loading = false;
+    };
+
+    loadView().catch((error: unknown) => {
         if (!active) return;
         const normalized = normalizeTransportError(error);
         errorCode = normalized.code;
@@ -31,8 +36,23 @@
         loading = false;
       });
 
+    let unlisten: (() => void) | undefined;
+    transport
+      .subscribeDataChanged(() => {
+        loadView().catch(() => undefined);
+      })
+      .then((cleanup) => {
+        if (!active) {
+          cleanup();
+          return;
+        }
+        unlisten = cleanup;
+      })
+      .catch(() => undefined);
+
     return () => {
       active = false;
+      unlisten?.();
     };
   });
 </script>
@@ -63,6 +83,15 @@
       <p>{errorMessage}</p>
     </section>
   {:else if bootstrap}
+    {#if ingestionStatus}
+      <section class="panel" aria-label="Ingestion status">
+        <strong>Storage</strong>
+        <span>{ingestionStatus.health.state}</span>
+        {#if ingestionStatus.recoveryMode !== 'normal'}
+          <span>{ingestionStatus.recoveryMode}</span>
+        {/if}
+      </section>
+    {/if}
     <section class="panel" aria-labelledby="modules-title">
       <div class="panel-heading">
         <h2 id="modules-title">{message('modules.title')}</h2>

@@ -50,6 +50,8 @@ fn settings(provider: Option<&str>) -> AppSettings {
     AppSettings {
         schema_version: mfa_config::CURRENT_SCHEMA_VERSION,
         locale: "en-US".to_owned(),
+        workspace_root: None,
+        app_data_root: None,
         active_providers,
     }
 }

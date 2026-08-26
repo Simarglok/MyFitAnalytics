@@ -1,4 +1,5 @@
 use crate::commands;
+use crate::events::tauri_event_sink;
 use crate::state::AppState;
 use std::error::Error;
 use tauri::Manager;
@@ -9,7 +10,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap_state,
-            commands::list_modules
+            commands::list_modules,
+            commands::set_workspace_root,
+            commands::refresh_now,
+            commands::get_ingestion_status,
+            commands::list_quality_items,
+            commands::retry_asset
         ])
         .setup(setup)
         .run(tauri::generate_context!())?;
@@ -21,6 +27,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let module_root = app.path().app_data_dir()?.join("modules");
     let state =
         AppState::from_roots_with_core_catalog(config_root, module_root, CORE_ENGLISH_CATALOG)?;
+    state.set_event_sink(tauri_event_sink(app.handle()));
+    if let Some(workspace_root) = state.settings().workspace_root.clone() {
+        tauri::async_runtime::block_on(state.configure_workspace(workspace_root))?;
+    }
     app.manage(state);
     Ok(())
 }

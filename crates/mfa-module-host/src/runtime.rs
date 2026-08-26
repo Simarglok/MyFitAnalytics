@@ -22,7 +22,7 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    pub(crate) fn new(code: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             detail: detail.into(),

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { dirname, join } from 'node:path';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
