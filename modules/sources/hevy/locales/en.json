@@ -1,0 +1,10 @@
+{
+  "locale": "en",
+  "namespace": "source.hevy",
+  "messages": {
+    "module.name": "Hevy",
+    "module.description": "Import synthetic-compatible Hevy measurements and workouts",
+    "error.invalid_utf8": "The Hevy CSV is not valid UTF-8.",
+    "error.invalid_schema": "The Hevy CSV headers do not match a supported export."
+  }
+}
