@@ -23,8 +23,11 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+
+const PERIODIC_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 
 pub trait SourceInvoker: Send + Sync + 'static {
     fn validate_source<'a>(
@@ -229,7 +232,7 @@ impl IngestionCoordinator {
             state: Arc::clone(&state),
         };
         let capacity = state.lock().unwrap().dependencies.queue_capacity;
-        let queue = ScanQueue::start(executor, capacity);
+        let queue = ScanQueue::start_periodic(executor, capacity, PERIODIC_SCAN_INTERVAL);
         Ok(Self {
             queue,
             state,

@@ -359,15 +359,13 @@ async fn bundled_mynetdiary_fixture_runs_through_refresh_archive_and_database() 
     })
     .unwrap();
     let mut events = coordinator.subscribe();
-    for _ in 0..2 {
-        coordinator
-            .request_scan(ScanRequest::new(
-                ScanReason::Manual,
-                "2026-08-26T00:03:00Z".parse::<UtcInstant>().unwrap(),
-            ))
-            .await
-            .unwrap();
-    }
+    coordinator
+        .request_scan(ScanRequest::new(
+            ScanReason::Startup,
+            "2026-08-26T00:03:00Z".parse::<UtcInstant>().unwrap(),
+        ))
+        .await
+        .unwrap();
     timeout(Duration::from_secs(20), async {
         loop {
             if matches!(

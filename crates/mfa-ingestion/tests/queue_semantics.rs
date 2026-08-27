@@ -53,6 +53,23 @@ impl ScanExecutor for FailOnceExecutor {
     }
 }
 
+#[derive(Clone)]
+struct CountingExecutor {
+    runs: Arc<AtomicUsize>,
+}
+
+impl ScanExecutor for CountingExecutor {
+    fn execute(
+        &self,
+        _request: ScanRequest,
+    ) -> BoxFuture<'_, Result<ScanReport, mfa_ingestion::IngestionError>> {
+        Box::pin(async move {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            Ok(ScanReport::default())
+        })
+    }
+}
+
 fn request() -> ScanRequest {
     ScanRequest::new(
         ScanReason::Manual,
@@ -104,4 +121,25 @@ async fn one_scan_failure_does_not_stop_later_scan_jobs() {
     assert!(queue.request_scan(request()).await.is_ok());
     assert_eq!(executor.runs.load(Ordering::SeqCst), 2);
     queue.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn periodic_scans_stop_after_queue_shutdown() {
+    let executor = CountingExecutor {
+        runs: Arc::new(AtomicUsize::new(0)),
+    };
+    let queue = ScanQueue::start_periodic(executor.clone(), 2, Duration::from_millis(10));
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while executor.runs.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    queue.shutdown().await.unwrap();
+    let runs_after_shutdown = executor.runs.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    assert_eq!(executor.runs.load(Ordering::SeqCst), runs_after_shutdown);
 }
