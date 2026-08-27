@@ -4,7 +4,7 @@ use crate::provenance::{
     SnapshotCommitResult, ValidatedSnapshotBatch,
 };
 pub use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewResponse};
-use mfa_contracts::{ModuleId, UtcInstant};
+use mfa_contracts::{ModuleId, PhaseEvent, UtcInstant};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -165,6 +165,24 @@ pub struct ListQualityItemsResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct CreatePhaseEvent {
+    pub phase_event: PhaseEvent,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdatePhaseEvent {
+    pub phase_event: PhaseEvent,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeletePhaseEvent {
+    pub phase_event_id: Uuid,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ListPhaseEvents;
+
+#[derive(Debug, Clone)]
 pub struct CommitSnapshot(pub Arc<ValidatedSnapshotBatch>);
 
 #[derive(Debug)]
@@ -200,6 +218,19 @@ pub enum DatabaseCommand {
         oneshot::Sender<Result<ReconcileArchiveInventoryResult, DatabaseError>>,
     ),
     ListQualityItems(oneshot::Sender<Result<ListQualityItemsResult, DatabaseError>>),
+    CreatePhaseEvent(
+        CreatePhaseEvent,
+        oneshot::Sender<Result<PhaseEvent, DatabaseError>>,
+    ),
+    UpdatePhaseEvent(
+        UpdatePhaseEvent,
+        oneshot::Sender<Result<PhaseEvent, DatabaseError>>,
+    ),
+    DeletePhaseEvent(
+        DeletePhaseEvent,
+        oneshot::Sender<Result<bool, DatabaseError>>,
+    ),
+    ListPhaseEvents(oneshot::Sender<Result<Vec<PhaseEvent>, DatabaseError>>),
     QueryView(
         QueryView,
         oneshot::Sender<Result<ViewResponse, DatabaseError>>,
@@ -313,6 +344,42 @@ impl IntoDatabaseCommand<ListQualityItemsResult> for ListQualityItems {
         response: oneshot::Sender<Result<ListQualityItemsResult, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::ListQualityItems(response)
+    }
+}
+
+impl IntoDatabaseCommand<PhaseEvent> for CreatePhaseEvent {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<PhaseEvent, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::CreatePhaseEvent(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<PhaseEvent> for UpdatePhaseEvent {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<PhaseEvent, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::UpdatePhaseEvent(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<bool> for DeletePhaseEvent {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<bool, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::DeletePhaseEvent(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<Vec<PhaseEvent>> for ListPhaseEvents {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<Vec<PhaseEvent>, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::ListPhaseEvents(response)
     }
 }
 

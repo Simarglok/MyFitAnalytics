@@ -12,6 +12,7 @@ use crate::provenance::{
     ExtensionRecord, LineageLink, RecordCounts, SnapshotCommitResult, SourceRecord,
     ValidatedSnapshotBatch, canonical_entity_key, canonical_identity,
 };
+use crate::snapshot;
 use crate::validation::{self, ValidationError};
 use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewRequest};
 use chrono::Utc;
@@ -90,6 +91,18 @@ fn process_command(
         }
         DatabaseCommand::ListQualityItems(response) => {
             let _ = response.send(list_quality_items(connection));
+        }
+        DatabaseCommand::CreatePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::create_phase_event(connection, command));
+        }
+        DatabaseCommand::UpdatePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::update_phase_event(connection, command));
+        }
+        DatabaseCommand::DeletePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::delete_phase_event(connection, command));
+        }
+        DatabaseCommand::ListPhaseEvents(response) => {
+            let _ = response.send(snapshot::list_phase_events(connection));
         }
         DatabaseCommand::QueryView(command, response) => {
             let _ = response.send(query_view(connection, command));
