@@ -2,7 +2,7 @@ use mfa_archive::{ArchiveCoordinator, ArchiveReconciler};
 use mfa_config::WorkspacePaths;
 use mfa_contracts::{
     CanonicalObservation, CapabilityId, ModuleId, ModuleManifest, ModuleType, NutritionItem,
-    SourceBatch, SourceManifest, UtcInstant,
+    SourceBatch, SourceManifest, SourceValidation, UtcInstant,
 };
 use mfa_db::{
     DatabaseFailurePoint, DatabaseService, LogicalSnapshotKey, QueryView, TestDatabaseFaultInjector,
@@ -28,6 +28,25 @@ struct FixtureRuntime {
 }
 
 impl SourceInvoker for FixtureRuntime {
+    fn validate_source<'a>(
+        &'a self,
+        _module: &'a InstalledModule,
+        _asset: Arc<dyn mfa_contracts::ReadOnlyAsset>,
+        _limits: RuntimeLimits,
+    ) -> BoxFuture<'a, Result<SourceValidation, RuntimeError>> {
+        Box::pin(async move {
+            Ok(SourceValidation {
+                valid: true,
+                issues: Vec::new(),
+                source_module_id: self.batch.source_module_id.clone(),
+                source_api_version: self.batch.source_api_version.clone(),
+                logical_snapshot_key: self.batch.logical_snapshot_key.clone(),
+                schema_fingerprint: self.batch.schema_fingerprint.clone(),
+                mapping_version: self.batch.mapping_version.clone(),
+            })
+        })
+    }
+
     fn invoke_source<'a>(
         &'a self,
         _module: &'a InstalledModule,
@@ -67,6 +86,9 @@ fn fixture_module(temp: &TempDir, module_id: ModuleId) -> InstalledModule {
             compatible_app_versions: vec![">=0.1.0".to_owned()],
             provided_capabilities: vec![CapabilityId::try_from("nutrition.items").unwrap()],
             accepted_file_patterns: vec!["*.fixture".to_owned()],
+            artifact_signatures: vec!["sha256:fixture-entrypoint".to_owned()],
+            extension_contracts: Vec::new(),
+            settings_schema: serde_json::json!({}),
             entrypoint_hash: "sha256:fixture-entrypoint".to_owned(),
             localization_namespace: "source.fixture".to_owned(),
         }),
@@ -75,6 +97,25 @@ fn fixture_module(temp: &TempDir, module_id: ModuleId) -> InstalledModule {
 
 fn fixture_batch() -> SourceBatch {
     SourceBatch {
+        contract_version: "1.0.0".parse().unwrap(),
+        source_module_id: "fixture-source".to_owned(),
+        source_api_version: "1.0.0".parse().unwrap(),
+        mapping_version: "1.0.0".parse().unwrap(),
+        schema_fingerprint:
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+        logical_snapshot_key: "fixture:2026".to_owned(),
+        source_records: vec![mfa_contracts::SourceRecord {
+            source_record_key: "gate-source-1".to_owned(),
+            sheet_name: None,
+            source_row_number: 1,
+            raw_payload: serde_json::json!({"fixture": true}),
+        }],
+        lineage: vec![mfa_contracts::LineageHook {
+            canonical_entity_type: "nutrition_item".to_owned(),
+            canonical_entity_id: "00000000-0000-0000-0000-0000000002bd".to_owned(),
+            source_record_key: "gate-source-1".to_owned(),
+            mapping_version: "1.0.0".parse().unwrap(),
+        }],
         records: vec![CanonicalObservation::NutritionItem(NutritionItem {
             nutrition_item_id: uuid::Uuid::from_u128(701),
             occurred_local_at: None,
@@ -215,7 +256,7 @@ async fn storage_gate_serializes_all_archive_ingestion_recovery_and_rebuild_path
     let view = rebuild
         .database()
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();

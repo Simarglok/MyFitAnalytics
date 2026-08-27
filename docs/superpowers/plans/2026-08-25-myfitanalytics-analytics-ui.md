@@ -306,7 +306,7 @@ git commit -m "feat: add sandboxed base dashboard module"
 
 ---
 
-### Task 5: Expose analytics and module lifecycle through typed application commands
+### Task 5: Expose analytics, provider selection, and phase events through typed application commands
 
 **Files:**
 
@@ -319,16 +319,13 @@ git commit -m "feat: add sandboxed base dashboard module"
 - Modify: `web/src/lib/tauri-transport.ts`
 - Modify: `web/src/lib/mock-transport.ts`
 - Test: `src-tauri/tests/dashboard_commands.rs`
-- Test: `src-tauri/tests/module_lifecycle_commands.rs`
+- Test: `src-tauri/tests/provider_selection_commands.rs`
 
 **Interfaces:**
 
 ```rust
 #[tauri::command] async fn get_navigation(state: State<'_, AppState>) -> Result<NavigationView, CommandError>;
 #[tauri::command] async fn get_dashboard(module_id: String, page_id: String, range: DateRangeView, state: State<'_, AppState>) -> Result<DashboardPageView, CommandError>;
-#[tauri::command] async fn install_module(package_path: String, state: State<'_, AppState>) -> Result<ModuleView, CommandError>;
-#[tauri::command] async fn set_module_enabled(module_id: String, enabled: bool, state: State<'_, AppState>) -> Result<ModuleView, CommandError>;
-#[tauri::command] async fn uninstall_module(module_id: String, state: State<'_, AppState>) -> Result<(), CommandError>;
 #[tauri::command] async fn select_provider(capability: String, module_id: String, state: State<'_, AppState>) -> Result<ProviderView, CommandError>;
 #[tauri::command] async fn save_phase_event(input: PhaseEventInput, state: State<'_, AppState>) -> Result<PhaseEventView, CommandError>;
 ```
@@ -341,11 +338,11 @@ Run: `cargo test -p myfitanalytics --test dashboard_commands`
 
 Expected: FAIL.
 
-**Step 2: Write failing module lifecycle command tests**
+**Step 2: Write failing provider-selection command tests**
 
-Install/enable/disable/update/uninstall source, dashboard, and locale packages without restart. Assert source enablement creates inbox/archive directories, disable stops new imports without deleting provenance/archive, provider conflicts require selection, bundled base can be disabled/uninstalled and reinstalled from the embedded catalog, core Settings/Recovery remains reachable, and navigation updates after dashboard lifecycle changes.
+Starting from packages installed through the lifecycle commands delivered by the Bundled Source Modules plan, assert provider conflicts require explicit selection, invalid providers are rejected, changing the provider atomically changes active canonical views and derived analytics, and navigation updates when dashboard availability changes. The earlier install/enable/disable/update/uninstall contract remains covered by `module_lifecycle_commands.rs` and is not reimplemented here.
 
-Run: `cargo test -p myfitanalytics --test module_lifecycle_commands`
+Run: `cargo test -p myfitanalytics --test provider_selection_commands`
 
 Expected: FAIL.
 
@@ -357,9 +354,9 @@ Query canonical DTOs through `DatabaseService`, compute base analytics outside t
 
 ```bash
 cargo test -p myfitanalytics --test dashboard_commands
-cargo test -p myfitanalytics --test module_lifecycle_commands
+cargo test -p myfitanalytics --test provider_selection_commands
 git add src-tauri web/src/lib
-git commit -m "feat: expose analytics and module lifecycle"
+git commit -m "feat: expose analytics and provider selection"
 ```
 
 ---
@@ -380,7 +377,7 @@ git commit -m "feat: expose analytics and module lifecycle"
 - Create: `web/src/lib/components/charts/ScatterChart.svelte`
 - Create: `web/src/lib/components/charts/CalendarHeatmap.svelte`
 - Create: `web/src/lib/pages/DashboardPage.svelte`
-- Create: `web/src/lib/pages/SettingsPage.svelte`
+- Modify: `web/src/lib/pages/SettingsPage.svelte`
 - Create: `web/src/lib/pages/SourcesQualityPage.svelte`
 - Create: `web/src/lib/pages/PhaseEventsPage.svelte`
 - Create: `web/src/lib/i18n/catalog.ts`
@@ -408,7 +405,7 @@ Construct ECharts options only inside trusted wrappers from typed numeric/catego
 
 **Step 3: Write failing page and Settings tests**
 
-Assert navigation, range changes, refresh-after-`DataChanged`, Overview/Body/Nutrition/Activity/Strength rendering, module install/update/enable/disable/uninstall, provider choice, locale choice, workspace choice, manual rescan, phase-event edit, and confirmation before destructive rebuild. Test aggregate states Healthy/Working/Attention/Blocked without modal focus stealing.
+Assert navigation, range changes, refresh-after-`DataChanged`, Overview/Body/Nutrition/Activity/Strength rendering, provider choice, dashboard dependency/availability details, locale choice, manual rescan, phase-event edit, and confirmation before destructive rebuild. Assert the workspace and module lifecycle controls delivered by the Bundled Source Modules plan remain present and functional. Test aggregate states Healthy/Working/Attention/Blocked without modal focus stealing.
 
 Run: `pnpm --dir web test -- --run`
 

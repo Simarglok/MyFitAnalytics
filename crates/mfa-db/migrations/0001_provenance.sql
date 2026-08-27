@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS source_record (
     asset_id VARCHAR NOT NULL,
     sheet_name VARCHAR,
     source_row_number UINTEGER NOT NULL,
-    source_record_key VARCHAR NOT NULL UNIQUE,
+    source_record_key VARCHAR NOT NULL,
     raw_payload JSON NOT NULL,
     FOREIGN KEY (attempt_id) REFERENCES ingestion_attempt(attempt_id),
     FOREIGN KEY (asset_id) REFERENCES source_asset(asset_id)
@@ -102,4 +102,5 @@ CREATE INDEX IF NOT EXISTS idx_source_receipt_asset ON source_receipt(asset_id);
 CREATE INDEX IF NOT EXISTS idx_attempt_asset ON ingestion_attempt(asset_id);
 CREATE INDEX IF NOT EXISTS idx_attempt_logical_key ON ingestion_attempt(logical_snapshot_key);
 CREATE INDEX IF NOT EXISTS idx_source_record_attempt ON source_record(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_source_record_key ON source_record(source_record_key);
 CREATE INDEX IF NOT EXISTS idx_quality_status ON data_quality_item(status);

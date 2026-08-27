@@ -19,6 +19,7 @@ world source-module {
   use host-asset.{asset-reader};
 
   export metadata: func() -> string;
+  export contract-version: func() -> string;
   export detect: func(asset: borrow<asset-reader>) -> u8;
   export validate: func(asset: borrow<asset-reader>) -> result<string, string>;
   export parse: func(asset: borrow<asset-reader>) -> result<string, string>;

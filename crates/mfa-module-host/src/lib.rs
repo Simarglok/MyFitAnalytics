@@ -13,6 +13,11 @@ pub use capabilities::{CapabilityError, CapabilityRegistry, ProviderResolution};
 pub use error::PackageError;
 pub use limits::RuntimeLimits;
 pub use locales::{LocaleError, LocaleResolver, ResolvedMessage};
-pub use package::{InspectedEntry, InspectedPackage, InstalledModule, PackageInstaller};
+#[cfg(any(test, feature = "test-support"))]
+pub use package::UninstallFinalizationFault;
+pub use package::{
+    BundledModuleUpdate, BundledPackageInfo, InspectedEntry, InspectedPackage, InstalledModule,
+    PackageInstaller, UninstallTransaction,
+};
 pub use registry::ModuleRegistry;
 pub use runtime::{ComponentRuntime, RuntimeError};

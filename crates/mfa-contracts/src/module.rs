@@ -1,11 +1,13 @@
 use crate::{CapabilityId, ContractError, DashboardRequirement, ExtensionRequirement};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 use std::str::FromStr;
 
 pub const PACKAGE_FORMAT_VERSION: &str = "1.0.0";
 pub const SOURCE_API_VERSION: &str = "1.0.0";
+pub const SOURCE_BATCH_CONTRACT_VERSION: &str = "1.0.0";
 pub const DASHBOARD_API_VERSION: &str = "1.0.0";
 pub const LOCALE_API_VERSION: &str = "1.0.0";
 
@@ -124,8 +126,18 @@ pub struct SourceManifest {
     #[serde(alias = "capabilities")]
     pub provided_capabilities: Vec<CapabilityId>,
     pub accepted_file_patterns: Vec<String>,
+    pub artifact_signatures: Vec<String>,
+    pub extension_contracts: Vec<SourceExtensionContract>,
+    pub settings_schema: Value,
     pub entrypoint_hash: String,
     pub localization_namespace: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceExtensionContract {
+    pub namespace: String,
+    pub contract_version: ContractVersion,
+    pub payload_schema: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

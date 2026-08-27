@@ -9,15 +9,15 @@ use crate::fault::{DatabaseFailurePoint, DatabaseFaultInjector};
 use crate::migrations;
 use crate::provenance::{
     DataQualityItem, ExtensionContractRegistration, ExtensionContractRegistrationResult,
-    RecordCounts, SnapshotCommitResult, ValidatedSnapshotBatch, canonical_entity_key,
-    canonical_identity,
+    ExtensionRecord, LineageLink, RecordCounts, SnapshotCommitResult, SourceRecord,
+    ValidatedSnapshotBatch, canonical_entity_key, canonical_identity,
 };
 use crate::validation::{self, ValidationError};
-use crate::views::{QueryView, ViewRequest};
+use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewRequest};
 use chrono::Utc;
 use duckdb::{Connection, params};
-use mfa_contracts::{CanonicalObservation, CapabilityId};
-use serde_json::Value;
+use mfa_contracts::{CanonicalObservation, CapabilityId, ModuleId};
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -93,6 +93,9 @@ fn process_command(
         }
         DatabaseCommand::QueryView(command, response) => {
             let _ = response.send(query_view(connection, command));
+        }
+        DatabaseCommand::QuerySnapshot(command, response) => {
+            let _ = response.send(query_snapshot(connection, command));
         }
         DatabaseCommand::CommitSnapshot(command, response) => {
             let _ = response.send(commit_snapshot(connection, command.0, fault_injector));
@@ -582,7 +585,7 @@ fn commit_snapshot(
     }
 
     for observation in &batch.observations {
-        if !matches!(observation, CanonicalObservation::WorkoutSession(_)) {
+        if matches!(observation, CanonicalObservation::WorkoutSession(_)) {
             insert_canonical(
                 &transaction,
                 &snapshot_id_string,
@@ -594,7 +597,7 @@ fn commit_snapshot(
         }
     }
     for observation in &batch.observations {
-        if matches!(observation, CanonicalObservation::WorkoutSession(_)) {
+        if !matches!(observation, CanonicalObservation::WorkoutSession(_)) {
             insert_canonical(
                 &transaction,
                 &snapshot_id_string,
@@ -1008,6 +1011,552 @@ fn list_quality_items(connection: &Connection) -> Result<ListQualityItemsResult,
         .collect::<Result<Vec<_>, _>>()
         .map_err(DatabaseError::from_duckdb)?;
     Ok(ListQualityItemsResult { items })
+}
+
+fn query_snapshot(
+    connection: &Connection,
+    command: QuerySnapshot,
+) -> Result<SnapshotResponse, DatabaseError> {
+    let logical_snapshot_key = command.logical_snapshot_key.to_string();
+    let view = query_view(
+        connection,
+        QueryView::active_snapshot(command.logical_snapshot_key),
+    )?;
+    let Some(snapshot_id) = view.snapshot_id else {
+        return Ok(SnapshotResponse {
+            logical_snapshot_key,
+            snapshot_id: None,
+            counts: view.counts,
+            canonical_records: Vec::new(),
+            source_records: Vec::new(),
+            historical_source_records: Vec::new(),
+            lineage: Vec::new(),
+            extensions: Vec::new(),
+            issues: Vec::new(),
+        });
+    };
+    let (attempt_id, asset_id): (String, String) = connection
+        .query_row(
+            "SELECT s.attempt_id, a.asset_id
+             FROM active_snapshot AS s
+             JOIN ingestion_attempt AS a ON a.attempt_id = s.attempt_id
+             WHERE s.logical_snapshot_key = ?",
+            params![&logical_snapshot_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let asset_id = asset_id.parse().map_err(|error| DatabaseError::Command {
+        detail: format!("stored asset identity is invalid: {error}"),
+    })?;
+    Ok(SnapshotResponse {
+        logical_snapshot_key: logical_snapshot_key.clone(),
+        snapshot_id: Some(snapshot_id),
+        counts: view.counts,
+        canonical_records: query_canonical_records(connection, &view.logical_snapshot_key)?,
+        source_records: query_source_records(connection, &attempt_id)?,
+        historical_source_records: query_historical_source_records(
+            connection,
+            &logical_snapshot_key,
+        )?,
+        lineage: query_lineage(connection, &snapshot_id.to_string())?,
+        extensions: query_extensions(connection, &attempt_id)?,
+        issues: list_quality_items(connection)?
+            .items
+            .into_iter()
+            .filter(|item| item.source_asset_id == Some(asset_id))
+            .collect(),
+    })
+}
+
+fn query_source_records(
+    connection: &Connection,
+    attempt_id: &str,
+) -> Result<Vec<SourceRecord>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT source_record_id, sheet_name, source_row_number,
+                    source_record_key, raw_payload
+             FROM source_record
+             WHERE attempt_id = ?
+             ORDER BY source_row_number, source_record_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![attempt_id], |row| {
+            let raw_payload: String = row.get(4)?;
+            let raw_payload = serde_json::from_str(&raw_payload).map_err(|error| {
+                duckdb::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error.to_string(),
+                )))
+            })?;
+            Ok(SourceRecord {
+                source_record_id: row.get(0)?,
+                sheet_name: row.get(1)?,
+                source_row_number: row.get(2)?,
+                source_record_key: row.get(3)?,
+                raw_payload,
+            })
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_historical_source_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<SourceRecord>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT r.source_record_id, r.sheet_name, r.source_row_number,
+                    r.source_record_key, r.raw_payload
+             FROM source_record AS r
+             JOIN ingestion_attempt AS a ON a.attempt_id = r.attempt_id
+             WHERE a.logical_snapshot_key = ?
+             ORDER BY a.started_at, r.source_row_number, r.source_record_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let raw_payload: String = row.get(4)?;
+            let raw_payload = serde_json::from_str(&raw_payload).map_err(|error| {
+                duckdb::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error.to_string(),
+                )))
+            })?;
+            Ok(SourceRecord {
+                source_record_id: row.get(0)?,
+                sheet_name: row.get(1)?,
+                source_row_number: row.get(2)?,
+                source_record_key: row.get(3)?,
+                raw_payload,
+            })
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_lineage(
+    connection: &Connection,
+    snapshot_id: &str,
+) -> Result<Vec<LineageLink>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT canonical_entity_type, canonical_entity_id,
+                    source_record_id, mapping_version
+             FROM lineage
+             WHERE snapshot_id = ?
+             ORDER BY canonical_entity_type, canonical_entity_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![snapshot_id], |row| {
+            Ok(LineageLink {
+                canonical_entity_type: row.get(0)?,
+                canonical_entity_id: row.get(1)?,
+                source_record_id: row.get(2)?,
+                mapping_version: row.get(3)?,
+            })
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_extensions(
+    connection: &Connection,
+    attempt_id: &str,
+) -> Result<Vec<ExtensionRecord>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT e.extension_record_id, e.source_record_id, e.source_module_id,
+                    e.contract_id, e.contract_version, e.occurred_local_at,
+                    e.local_date, e.payload
+             FROM extension_record AS e
+             JOIN source_record AS r ON r.source_record_id = e.source_record_id
+             WHERE r.attempt_id = ?
+             ORDER BY e.extension_record_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![attempt_id], |row| {
+            let payload: String = row.get(7)?;
+            let payload = serde_json::from_str(&payload).map_err(|error| {
+                duckdb::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error.to_string(),
+                )))
+            })?;
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<chrono::NaiveDateTime>>(5)?,
+                row.get::<_, Option<chrono::NaiveDate>>(6)?,
+                payload,
+            ))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.into_iter()
+        .map(
+            |(
+                extension_record_id,
+                source_record_id,
+                source_module_id,
+                contract_id,
+                contract_version,
+                occurred_local_at,
+                local_date,
+                payload,
+            )| {
+                Ok(ExtensionRecord {
+                    extension_record_id,
+                    source_record_id,
+                    source_module_id: ModuleId::try_from(source_module_id).map_err(|error| {
+                        DatabaseError::Command {
+                            detail: error.to_string(),
+                        }
+                    })?,
+                    contract_id,
+                    contract_version,
+                    occurred_local_at: occurred_local_at.map(Into::into),
+                    local_date: local_date.map(Into::into),
+                    payload,
+                })
+            },
+        )
+        .collect()
+}
+
+fn query_canonical_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut records = Vec::new();
+    records.extend(query_nutrition_records(connection, logical_snapshot_key)?);
+    records.extend(query_body_records(connection, logical_snapshot_key)?);
+    records.extend(query_activity_event_records(
+        connection,
+        logical_snapshot_key,
+    )?);
+    records.extend(query_activity_day_records(
+        connection,
+        logical_snapshot_key,
+    )?);
+    records.extend(query_heart_rate_records(connection, logical_snapshot_key)?);
+    records.extend(query_workout_session_records(
+        connection,
+        logical_snapshot_key,
+    )?);
+    records.extend(query_exercise_set_records(
+        connection,
+        logical_snapshot_key,
+    )?);
+    records.extend(query_phase_records(connection, logical_snapshot_key)?);
+    Ok(records)
+}
+
+fn query_nutrition_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT nutrition_item_id, occurred_local_at, local_date, meal,
+                    food_source_id, name, amount_raw, calories_kcal, protein_g,
+                    fat_g, carbs_g, fiber_g, sugars_g, sodium_mg, source_record_id
+             FROM active_nutrition_items
+             WHERE logical_snapshot_key = ?
+             ORDER BY nutrition_item_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let occurred_local_at = row
+                .get::<_, Option<chrono::NaiveDateTime>>(1)?
+                .map(|value| value.to_string());
+            let local_date: chrono::NaiveDate = row.get(2)?;
+            Ok(json!({
+                "type": "nutrition_item",
+                "value": {
+                    "nutrition_item_id": row.get::<_, String>(0)?,
+                    "occurred_local_at": occurred_local_at,
+                    "local_date": local_date.to_string(),
+                    "meal": row.get::<_, String>(3)?,
+                    "food_source_id": row.get::<_, String>(4)?,
+                    "name": row.get::<_, String>(5)?,
+                    "amount_raw": row.get::<_, String>(6)?,
+                    "calories_kcal": row.get::<_, Option<f64>>(7)?,
+                    "protein_g": row.get::<_, Option<f64>>(8)?,
+                    "fat_g": row.get::<_, Option<f64>>(9)?,
+                    "carbs_g": row.get::<_, Option<f64>>(10)?,
+                    "fiber_g": row.get::<_, Option<f64>>(11)?,
+                    "sugars_g": row.get::<_, Option<f64>>(12)?,
+                    "sodium_mg": row.get::<_, Option<f64>>(13)?,
+                    "source_record_id": row.get::<_, String>(14)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_body_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT body_measurement_id, local_date, weight_kg,
+                    body_fat_pct, source_record_id
+             FROM active_body_measurements
+             WHERE logical_snapshot_key = ?
+             ORDER BY body_measurement_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let local_date: chrono::NaiveDate = row.get(1)?;
+            Ok(json!({
+                "type": "body_measurement",
+                "value": {
+                    "body_measurement_id": row.get::<_, String>(0)?,
+                    "local_date": local_date.to_string(),
+                    "weight_kg": row.get::<_, f64>(2)?,
+                    "body_fat_pct": row.get::<_, Option<f64>>(3)?,
+                    "source_record_id": row.get::<_, String>(4)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_activity_event_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT activity_event_id, occurred_local_at, local_date, activity_type,
+                    source_name, duration_seconds, distance_km,
+                    estimated_calories_kcal, origin_hint, quality_status, source_record_id
+             FROM active_activity_events
+             WHERE logical_snapshot_key = ?
+             ORDER BY activity_event_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let occurred_local_at: chrono::NaiveDateTime = row.get(1)?;
+            let local_date: chrono::NaiveDate = row.get(2)?;
+            Ok(json!({
+                "type": "activity_event",
+                "value": {
+                    "activity_event_id": row.get::<_, String>(0)?,
+                    "occurred_local_at": occurred_local_at.to_string(),
+                    "local_date": local_date.to_string(),
+                    "activity_type": row.get::<_, String>(3)?,
+                    "source_name": row.get::<_, String>(4)?,
+                    "duration_seconds": row.get::<_, Option<u32>>(5)?,
+                    "distance_km": row.get::<_, Option<f64>>(6)?,
+                    "estimated_calories_kcal": row.get::<_, Option<f64>>(7)?,
+                    "origin_hint": row.get::<_, Option<String>>(8)?,
+                    "quality_status": row.get::<_, String>(9)?,
+                    "source_record_id": row.get::<_, String>(10)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_activity_day_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT activity_day_id, local_date, steps, water_ml,
+                    heart_rate_observation_count, activity_duration_seconds,
+                    activity_distance_km, estimated_activity_calories_kcal, source_record_id
+             FROM active_activity_days
+             WHERE logical_snapshot_key = ?
+             ORDER BY activity_day_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let local_date: chrono::NaiveDate = row.get(1)?;
+            Ok(json!({
+                "type": "activity_day",
+                "value": {
+                    "local_date": local_date.to_string(),
+                    "steps": row.get::<_, Option<u64>>(2)?,
+                    "water_ml": row.get::<_, Option<f64>>(3)?,
+                    "heart_rate_observation_count": row.get::<_, u32>(4)?,
+                    "activity_duration_seconds": row.get::<_, u64>(5)?,
+                    "activity_distance_km": row.get::<_, f64>(6)?,
+                    "estimated_activity_calories_kcal": row.get::<_, f64>(7)?,
+                    "source_record_id": row.get::<_, String>(8)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_heart_rate_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT heart_rate_observation_id, observed_local_at,
+                    heart_rate_bpm, source_record_id
+             FROM active_heart_rate_observations
+             WHERE logical_snapshot_key = ?
+             ORDER BY heart_rate_observation_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let observed_local_at: chrono::NaiveDateTime = row.get(1)?;
+            Ok(json!({
+                "type": "heart_rate",
+                "value": {
+                    "heart_rate_observation_id": row.get::<_, String>(0)?,
+                    "observed_local_at": observed_local_at.to_string(),
+                    "heart_rate_bpm": row.get::<_, f64>(2)?,
+                    "source_record_id": row.get::<_, String>(3)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_workout_session_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT workout_session_id, title, started_local_at, ended_local_at,
+                    duration_seconds, source_record_group_key, source_record_id
+             FROM active_workout_sessions
+             WHERE logical_snapshot_key = ?
+             ORDER BY workout_session_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let started_local_at: chrono::NaiveDateTime = row.get(2)?;
+            let ended_local_at: chrono::NaiveDateTime = row.get(3)?;
+            Ok(json!({
+                "type": "workout_session",
+                "value": {
+                    "workout_session_id": row.get::<_, String>(0)?,
+                    "title": row.get::<_, String>(1)?,
+                    "started_local_at": started_local_at.to_string(),
+                    "ended_local_at": ended_local_at.to_string(),
+                    "duration_seconds": row.get::<_, Option<u32>>(4)?,
+                    "source_record_group_key": row.get::<_, String>(5)?,
+                    "source_record_id": row.get::<_, String>(6)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_exercise_set_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT exercise_set_id, workout_session_id, exercise_title_raw,
+                    exercise_key, exercise_block_ordinal, set_index, set_type,
+                    load_type, weight_kg, reps, duration_seconds, rpe, source_record_id
+             FROM active_exercise_sets
+             WHERE logical_snapshot_key = ?
+             ORDER BY exercise_set_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            Ok(json!({
+                "type": "exercise_set",
+                "value": {
+                    "exercise_set_id": row.get::<_, String>(0)?,
+                    "workout_session_id": row.get::<_, String>(1)?,
+                    "exercise_title_raw": row.get::<_, String>(2)?,
+                    "exercise_key": row.get::<_, String>(3)?,
+                    "exercise_block_ordinal": row.get::<_, u32>(4)?,
+                    "set_index": row.get::<_, u32>(5)?,
+                    "set_type": row.get::<_, String>(6)?,
+                    "load_type": row.get::<_, String>(7)?,
+                    "weight_kg": row.get::<_, Option<f64>>(8)?,
+                    "reps": row.get::<_, Option<u32>>(9)?,
+                    "duration_seconds": row.get::<_, Option<u32>>(10)?,
+                    "rpe": row.get::<_, Option<f64>>(11)?,
+                    "source_record_id": row.get::<_, String>(12)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
+}
+
+fn query_phase_records(
+    connection: &Connection,
+    logical_snapshot_key: &str,
+) -> Result<Vec<Value>, DatabaseError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT phase_event_id, event_type, start_date, end_date,
+                    description, exclude_from_tdee, source_record_id
+             FROM active_phase_events
+             WHERE logical_snapshot_key = ?
+             ORDER BY phase_event_id",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![logical_snapshot_key], |row| {
+            let start_date: chrono::NaiveDate = row.get(2)?;
+            let end_date: chrono::NaiveDate = row.get(3)?;
+            Ok(json!({
+                "type": "phase_event",
+                "value": {
+                    "phase_event_id": row.get::<_, String>(0)?,
+                    "event_type": row.get::<_, String>(1)?,
+                    "start_date": start_date.to_string(),
+                    "end_date": end_date.to_string(),
+                    "description": row.get::<_, Option<String>>(4)?,
+                    "exclude_from_tdee": row.get::<_, bool>(5)?,
+                    "source_record_id": row.get::<_, String>(6)?,
+                }
+            }))
+        })
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from_duckdb)
 }
 
 fn query_view(connection: &Connection, command: QueryView) -> Result<ViewResponse, DatabaseError> {

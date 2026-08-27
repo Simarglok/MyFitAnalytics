@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan. Use `superpowers:test-driven-development` for every parser and mapping behavior and `superpowers:verification-before-completion` before closing the plan.
 
-**Goal:** Implement installable MyNetDiary and Hevy source components that convert the approved export formats into deterministic, lineage-complete canonical batches through the production Wasmtime contract.
+**Goal:** Implement installable MyNetDiary and Hevy source components, then expose the minimum Settings workflow required to choose a workspace and install, enable, disable, update, and uninstall module packages without rebuilding or restarting the desktop application.
 
-**Architecture:** Each source is a separate Rust guest component under `modules/sources`. Guests accept archive bytes and metadata only, detect content rather than trusting filenames, and emit source records, canonical observations, extensions, and mapping issues. A shared host conformance harness builds, packages, installs, and invokes each component without granting ambient authority.
+**Architecture:** Each source is a separate Rust guest component under `modules/sources`. Guests accept archive bytes and metadata only, detect content rather than trusting filenames, and emit source records, canonical observations, extensions, and mapping issues. A shared host conformance harness builds, packages, installs, and invokes each component without granting ambient authority. The Tauri host owns native workspace/package pickers and the mutable module registry; a minimal Svelte Settings page invokes only typed commands and reflects registry changes in the same application session.
 
-**Tech Stack:** Rust 1.94.0, WebAssembly Component Model, `cargo-component`, Calamine 0.36.1 with `chrono` for BIFF `.xls`, `csv`, Serde, Chrono, synthetic BIFF8/CSV fixtures, `insta` snapshots.
+**Tech Stack:** Rust 1.94.0, WebAssembly Component Model, `cargo-component`, Calamine 0.36.1 with `chrono` for BIFF `.xls`, `csv`, Serde, Chrono, Tauri 2 native dialogs, Svelte 5, Vitest, synthetic BIFF8/CSV fixtures, `insta` snapshots.
 
-**Spec:** [MVP-SPEC.md Sections 4–8, 10, 12–13, 14.6, 19.1–19.4, 20](</Users/simarglok/Library/Mobile Documents/iCloud~md~obsidian/Documents/Simarglok/MyFitAnalytics/MVP-SPEC.md>)
+**Spec:** [MVP-SPEC.md Sections 4–8, 10, 12–13, 14.5–14.9, 19.1–19.4, 20](</Users/simarglok/Library/Mobile Documents/iCloud~md~obsidian/Documents/Simarglok/MyFitAnalytics/MVP-SPEC.md>)
 
 ## Global Constraints
 
@@ -21,6 +21,8 @@
 - Unknown governed values become explicit quality issues and remain traceable.
 - MyNetDiary strength rows produce no canonical activity; Hevy owns strength capabilities.
 - MyNetDiary body-weight/body-fat rows produce no base body capability; Hevy owns them in the MVP default provider configuration.
+- By this plan's acceptance gate, a user can choose the workspace and manage local `.mfasource`, `.mfadashboard`, and `.mfalocale` packages from Settings without rebuilding or restarting the application.
+- Native pickers return only a user-approved directory or package path. The frontend never receives unrestricted filesystem access.
 
 ---
 
@@ -423,6 +425,115 @@ git add scripts src-tauri crates/mfa-integration-tests docs/source-module-author
 git commit -m "feat: bundle verified MyNetDiary and Hevy modules"
 ```
 
+---
+
+### Task 7: Make workspace and module lifecycle operable from Settings
+
+**Files:**
+
+- Modify: `Cargo.lock`
+- Modify: `src-tauri/Cargo.toml`
+- Create: `src-tauri/src/dialogs.rs`
+- Modify: `src-tauri/src/app.rs`
+- Modify: `src-tauri/src/commands.rs`
+- Modify: `src-tauri/src/state.rs`
+- Modify: `src-tauri/capabilities/default.json`
+- Modify: `modules/locales/en/messages.json`
+- Modify: `web/src/App.svelte`
+- Modify: `web/src/styles.css`
+- Modify: `web/src/lib/types.ts`
+- Modify: `web/src/lib/transport.ts`
+- Modify: `web/src/lib/tauri-transport.ts`
+- Modify: `web/src/lib/mock-transport.ts`
+- Create: `web/src/lib/pages/SettingsPage.svelte`
+- Test: `src-tauri/tests/module_lifecycle_commands.rs`
+- Test: `web/src/lib/pages/SettingsPage.test.ts`
+
+**Interfaces:**
+
+```rust
+pub struct ModuleCatalogEntryView {
+    pub module: ModuleView,
+    pub origin: String,
+    pub install_state: String,
+    pub available_version: Option<String>,
+}
+
+#[tauri::command]
+async fn choose_workspace_root(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<WorkspaceView>, CommandError>;
+
+#[tauri::command]
+async fn list_module_catalog(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ModuleCatalogEntryView>, CommandError>;
+
+#[tauri::command]
+async fn choose_and_install_module(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<ModuleView>, CommandError>;
+
+#[tauri::command]
+async fn set_module_enabled(
+    module_id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<ModuleView, CommandError>;
+
+#[tauri::command]
+async fn uninstall_module(
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError>;
+```
+
+**Step 1: Write failing native lifecycle tests**
+
+Use a mock dialog port. Assert the workspace picker accepts directories only; the package picker filters `.mfasource`, `.mfadashboard`, and `.mfalocale`; cancellation returns `Ok(None)`; incompatible or malformed packages return stable `PackageError` codes; and a successful install is visible through `list_module_catalog` without restart. Installing a compatible newer version must expose the update in the catalog, preserve the current package after failed inspection, and switch only after successful installation. Assert enabling a source requires a configured workspace, creates its inbox/archive subtree, refreshes capability/provider resolution, and starts its ingestion coordinator. Assert disable stops new scans without deleting archive, provenance, or canonical history. Assert uninstall requires the module to be disabled, removes only executable package bytes, and leaves bundled catalog entries available for reinstall.
+
+Run: `cargo test -p myfitanalytics --test module_lifecycle_commands -- --test-threads=1`
+
+Expected: FAIL because the application state is immutable after startup and native picker commands do not exist.
+
+**Step 2: Write failing Settings UI tests**
+
+Render configured and unconfigured states through `MockTransport`. Assert Settings offers `Choose Workspace...` and `Install Module Package...`, groups catalog entries into Sources/Dashboards/Language, shows installed/available/enabled/disabled/incompatible/update states, confirms uninstall, reports stable localized errors, and refreshes the list after every successful action. A source cannot be enabled before workspace selection, and the UI explains why. Cancellation changes no state and is not shown as an error.
+
+Run: `pnpm --dir web test -- --run SettingsPage`
+
+Expected: FAIL because the minimal Settings page and lifecycle transport methods do not exist.
+
+**Step 3: Implement native pickers and mutable registry refresh**
+
+Wrap Tauri dialogs behind a mockable `DialogPort`. Keep the selected package path inside the Rust command; return the configured workspace path only as part of `WorkspaceView` for display. Pass an approved package path directly to `PackageInstaller`, then rebuild installed-module, capability-provider, and locale state atomically before returning a view model. Reconfigure only affected source coordinators after enable/disable; do not open another DuckDB connection. The package picker grants access only to the selected file and the inspector remains authoritative for type, extension, compatibility, hashes, archive traversal, and executable-content validation.
+
+**Step 4: Implement the minimal Settings page**
+
+Keep lifecycle calls in `AppTransport`; Settings receives typed catalog entries and never submits manually entered filesystem paths. Preserve the existing storage-health and installed-module summary on the application shell, add navigation to Settings, display the configured workspace and each enabled source inbox path from `WorkspaceView`, and use localization keys for every new user-facing string. Bundled MyNetDiary and Hevy packages appear as available or installed entries and use the same lifecycle commands as user-selected packages.
+
+**Step 5: Run lifecycle and regression gates**
+
+```bash
+cargo test -p myfitanalytics --test module_lifecycle_commands -- --test-threads=1
+cargo test --workspace -- --test-threads=1
+pnpm --dir web test -- --run SettingsPage
+pnpm --dir web check
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add Cargo.lock src-tauri modules/locales/en web
+git commit -m "feat: manage module packages from settings"
+```
+
 ## Plan Completion Evidence
 
-Write `docs/superpowers/evidence/source-modules.md` with fixture digests, package digests, conformance reports, canonical count/value assertions, and provider-selection evidence. The user’s external exports may be used for a local non-committed validation run; record only redacted schema fingerprints and pass/fail outcomes, never raw values or paths.
+Write `docs/superpowers/evidence/source-modules.md` with fixture digests, package digests, conformance reports, canonical count/value assertions, provider-selection evidence, native lifecycle test output, Settings UI test output, and a macOS smoke showing workspace selection plus package install/disable/re-enable without rebuilding or restarting the application. The user’s external exports may be used for a local non-committed validation run; record only redacted schema fingerprints and pass/fail outcomes, never raw values or paths.

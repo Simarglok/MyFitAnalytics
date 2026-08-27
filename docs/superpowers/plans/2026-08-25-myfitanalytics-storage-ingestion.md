@@ -393,7 +393,7 @@ git commit -m "feat: recover ingestion and rebuild from archive"
 **Interfaces:**
 
 ```rust
-#[tauri::command] async fn set_workspace_root(path: String, state: State<'_, AppState>) -> Result<WorkspaceView, CommandError>;
+#[tauri::command] async fn choose_workspace_root(state: State<'_, AppState>) -> Result<Option<WorkspaceView>, CommandError>;
 #[tauri::command] async fn refresh_now(state: State<'_, AppState>) -> Result<ScanTicketView, CommandError>;
 #[tauri::command] async fn get_ingestion_status(state: State<'_, AppState>) -> Result<IngestionStatusView, CommandError>;
 #[tauri::command] async fn list_quality_items(state: State<'_, AppState>) -> Result<Vec<QualityItemView>, CommandError>;

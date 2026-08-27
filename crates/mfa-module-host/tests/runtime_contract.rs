@@ -29,6 +29,35 @@ async fn source_component_transforms_asset_and_returns_validated_batch() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_component_validation_returns_guest_snapshot_metadata() {
+    let store = TempDir::new().unwrap();
+    let module = source_module(&store, "guest-source.wasm", &["body.weight"]);
+    let validation = ComponentRuntime::new()
+        .validate_source(&module, asset(b"ok"), limits())
+        .await
+        .unwrap();
+
+    assert!(validation.valid);
+    assert_eq!(validation.source_module_id, "guest-source");
+    assert_eq!(validation.source_api_version.to_string(), "1.0.0");
+    assert_eq!(validation.mapping_version.to_string(), "1.0.0");
+    assert_eq!(validation.logical_snapshot_key, "fixture:2026");
+    assert!(validation.schema_fingerprint.starts_with("sha256:"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_component_rejects_duplicate_guest_source_record_keys() {
+    let store = TempDir::new().unwrap();
+    let module = source_module(&store, "guest-source.wasm", &["body.weight"]);
+    let error = ComponentRuntime::new()
+        .invoke_source(&module, asset(b"invalid-record"), limits())
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), "source_record_identity_invalid");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dashboard_component_returns_only_declarative_document_contract() {
     let store = TempDir::new().unwrap();
     let module = dashboard_module(&store, "guest-dashboard.wasm");

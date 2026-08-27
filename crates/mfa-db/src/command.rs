@@ -3,7 +3,7 @@ use crate::provenance::{
     DataQualityItem, ExtensionContractRegistration, ExtensionContractRegistrationResult,
     SnapshotCommitResult, ValidatedSnapshotBatch,
 };
-pub use crate::views::{QueryView, ViewResponse};
+pub use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewResponse};
 use mfa_contracts::{ModuleId, UtcInstant};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -204,6 +204,10 @@ pub enum DatabaseCommand {
         QueryView,
         oneshot::Sender<Result<ViewResponse, DatabaseError>>,
     ),
+    QuerySnapshot(
+        QuerySnapshot,
+        oneshot::Sender<Result<SnapshotResponse, DatabaseError>>,
+    ),
     CommitSnapshot(
         CommitSnapshot,
         oneshot::Sender<Result<SnapshotCommitResult, DatabaseError>>,
@@ -318,6 +322,15 @@ impl IntoDatabaseCommand<ViewResponse> for QueryView {
         response: oneshot::Sender<Result<ViewResponse, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::QueryView(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<SnapshotResponse> for QuerySnapshot {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<SnapshotResponse, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::QuerySnapshot(self, response)
     }
 }
 

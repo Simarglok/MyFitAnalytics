@@ -18,10 +18,11 @@ pub use locale::{LocalDate, LocalDateTime, UtcInstant};
 pub use module::{
     ContractVersion, DASHBOARD_API_VERSION, DashboardManifest, LOCALE_API_VERSION, LocaleFile,
     LocaleManifest, ModuleId, ModuleManifest, ModuleType, PACKAGE_FORMAT_VERSION,
-    SOURCE_API_VERSION, SourceManifest,
+    SOURCE_API_VERSION, SOURCE_BATCH_CONTRACT_VERSION, SourceExtensionContract, SourceManifest,
 };
 pub use observation::{
     ActivityDay, ActivityEvent, BodyMeasurement, CanonicalObservation, ExerciseSet,
-    ExtensionRecord, ExtensionRequirement, HeartRateObservation, LocaleBundle, MappingIssue,
-    NutritionItem, PhaseEvent, SourceBatch, SourceDescriptor, SourceValidation, WorkoutSession,
+    ExtensionRecord, ExtensionRequirement, HeartRateObservation, LineageHook, LocaleBundle,
+    MappingIssue, NutritionItem, PhaseEvent, SourceBatch, SourceDescriptor, SourceRecord,
+    SourceValidation, WorkoutSession,
 };

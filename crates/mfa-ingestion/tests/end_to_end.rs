@@ -125,13 +125,76 @@ async fn successful_asset_follows_archive_parse_commit_and_data_changed_order() 
     assert!(!inbox.join("export.fixture").exists());
     let view = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();
     assert_eq!(view.counts.total, 1);
     database.shutdown().await.unwrap();
     coordinator.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_scan_autonomously_ingests_preexisting_stable_file() {
+    let temp = TempDir::new().unwrap();
+    let source = mfa_contracts::ModuleId::try_from("fixture-source").unwrap();
+    let workspace = WorkspacePaths::new(temp.path().join("workspace"));
+    workspace.enable_source(&source).unwrap();
+    let inbox = workspace.source_inbox(&source);
+    let source_path = inbox.join("preexisting.fixture");
+    std::fs::write(&source_path, b"preexisting stable asset").unwrap();
+
+    let app_data = temp.path().join("app-data");
+    std::fs::create_dir_all(&app_data).unwrap();
+    let database = DatabaseService::start(&app_data.join("db.duckdb"), 8)
+        .await
+        .unwrap();
+    let dependencies = IngestionDependencies {
+        workspace: workspace.clone(),
+        source_module: fake_module(&temp, source.clone()),
+        archive: ArchiveCoordinator::new(workspace.clone(), source.clone()),
+        database: database.clone(),
+        runtime: fake_runtime(nutrition_batch()),
+        limits: RuntimeLimits {
+            max_memory_bytes: 8 * 1024 * 1024,
+            fuel: 1_000_000,
+            timeout: Duration::from_secs(1),
+            max_output_bytes: 64 * 1024,
+        },
+        queue_capacity: 2,
+    };
+    let coordinator = IngestionCoordinator::start(dependencies).unwrap();
+
+    coordinator
+        .request_scan(ScanRequest::new(
+            ScanReason::Startup,
+            "2026-08-25T00:00:00Z".parse::<UtcInstant>().unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    timeout(Duration::from_secs(3), async {
+        loop {
+            let archive = ArchiveReconciler::new(workspace.clone(), source.clone())
+                .scan()
+                .unwrap();
+            let view = database
+                .execute(QueryView::active_snapshot(
+                    LogicalSnapshotKey::new("fixture:2026").unwrap(),
+                ))
+                .await
+                .unwrap();
+            if !source_path.exists() && archive.assets.len() == 1 && view.counts.total == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("one startup scan should converge a stable preexisting file");
+
+    coordinator.shutdown().await.unwrap();
+    database.shutdown().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -313,6 +376,9 @@ async fn extension_contract_registration_failure_marks_attempt_failed_immediatel
         namespace: "fixture.extension".to_owned(),
         contract_version: "1.0.0".parse().unwrap(),
         record_type: "fixture.record".to_owned(),
+        source_record_key: "source-1".to_owned(),
+        occurred_local_at: None,
+        local_date: None,
         payload: serde_json::json!({"value": 1}),
     });
     let temp = TempDir::new().unwrap();

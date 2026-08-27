@@ -10,7 +10,7 @@ use mfa_archive::{
 use mfa_config::WorkspacePaths;
 use mfa_contracts::{
     AssetMetadata, AssetReadError, CanonicalObservation, ModuleId, ModuleManifest, ReadOnlyAsset,
-    SourceBatch, UtcInstant,
+    SourceBatch, SourceValidation, UtcInstant,
 };
 use mfa_db::{
     ArchiveAssetRecord, AssetRegistration, AttemptIdentity, CommitSnapshot, DataQualityItem,
@@ -19,15 +19,24 @@ use mfa_db::{
     SourceRecord, ValidatedSnapshotBatch, validation,
 };
 use mfa_module_host::{InstalledModule, RuntimeError, RuntimeLimits};
-use serde_json::json;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+const PERIODIC_SCAN_INTERVAL: Duration = Duration::from_secs(1);
+
 pub trait SourceInvoker: Send + Sync + 'static {
+    fn validate_source<'a>(
+        &'a self,
+        module: &'a InstalledModule,
+        asset: Arc<dyn ReadOnlyAsset>,
+        limits: RuntimeLimits,
+    ) -> BoxFuture<'a, Result<SourceValidation, RuntimeError>>;
+
     fn invoke_source<'a>(
         &'a self,
         module: &'a InstalledModule,
@@ -37,6 +46,17 @@ pub trait SourceInvoker: Send + Sync + 'static {
 }
 
 impl SourceInvoker for mfa_module_host::ComponentRuntime {
+    fn validate_source<'a>(
+        &'a self,
+        module: &'a InstalledModule,
+        asset: Arc<dyn ReadOnlyAsset>,
+        limits: RuntimeLimits,
+    ) -> BoxFuture<'a, Result<SourceValidation, RuntimeError>> {
+        Box::pin(mfa_module_host::ComponentRuntime::validate_source(
+            self, module, asset, limits,
+        ))
+    }
+
     fn invoke_source<'a>(
         &'a self,
         module: &'a InstalledModule,
@@ -212,12 +232,16 @@ impl IngestionCoordinator {
             state: Arc::clone(&state),
         };
         let capacity = state.lock().unwrap().dependencies.queue_capacity;
-        let queue = ScanQueue::start(executor, capacity);
+        let queue = ScanQueue::start_periodic(executor, capacity, PERIODIC_SCAN_INTERVAL);
         Ok(Self {
             queue,
             state,
             events,
         })
+    }
+
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.state) as usize
     }
 
     pub async fn request_scan(
@@ -607,22 +631,43 @@ async fn process_candidate(
         return Ok(AssetOutcome::Duplicate);
     }
 
-    let (module_version, source_api_version, mapping_version) =
-        source_metadata(&dependencies.source_module)?;
-    let logical_key = infer_logical_key(
-        &dependencies.source_module.module_id,
-        &dependencies.source_module,
-        None,
-    )?;
+    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
+        registered_asset.asset_id,
+        archived.archive_path.clone(),
+        archived.original_filename.clone(),
+    ) {
+        Ok(asset) => Arc::new(asset),
+        Err(error) => return Err(error),
+    };
+    let validation = dependencies
+        .runtime
+        .validate_source(
+            &dependencies.source_module,
+            Arc::clone(&asset),
+            dependencies.limits,
+        )
+        .await
+        .map_err(|error| IngestionError::AssetFailure {
+            code: error.code().to_owned(),
+            detail: error.detail().to_owned(),
+        })?;
+    let (module_version, _, _) = source_metadata(&dependencies.source_module)?;
+    let logical_key =
+        LogicalSnapshotKey::new(validation.logical_snapshot_key.clone()).map_err(|error| {
+            IngestionError::AssetFailure {
+                code: error.code().to_owned(),
+                detail: error.to_string(),
+            }
+        })?;
     let attempt = AttemptIdentity {
         attempt_id: Uuid::new_v4(),
         asset_id: registered_asset.asset_id,
         source_module_id: archived.source_module_id.clone(),
         source_module_version: module_version,
         source_module_package_sha256: dependencies.source_module.package_hash.clone(),
-        source_api_version,
-        mapping_version,
-        schema_fingerprint: format!("module:{}", dependencies.source_module.package_hash),
+        source_api_version: validation.source_api_version.to_string(),
+        mapping_version: validation.mapping_version.to_string(),
+        schema_fingerprint: validation.schema_fingerprint,
         logical_snapshot_key: logical_key,
         started_at: received_at.clone(),
     };
@@ -653,19 +698,6 @@ async fn process_candidate(
         .await);
     }
 
-    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
-        registered_asset.asset_id,
-        archived.archive_path.clone(),
-        archived.original_filename.clone(),
-    ) {
-        Ok(asset) => Arc::new(asset),
-        Err(error) => {
-            emit(&state, CoreEvent::QualityChanged);
-            return Err(
-                fail_attempt_and_return(&dependencies.database, attempt.attempt_id, error).await,
-            );
-        }
-    };
     if let Err(error) = increment_runtime_invocations(&state) {
         emit(&state, CoreEvent::QualityChanged);
         return Err(
@@ -800,7 +832,6 @@ async fn import_archived_asset(
     attempt_tracker: Option<Arc<Mutex<Option<Uuid>>>>,
 ) -> Result<Option<Uuid>, IngestionError> {
     let archived = asset.into_archived_asset();
-    let (module_version, source_api_version, mapping_version) = source_metadata(&source_module)?;
     let registered_asset = database
         .execute(RegisterAsset {
             asset: AssetRegistration {
@@ -831,6 +862,22 @@ async fn import_archived_asset(
         })
         .await
         .map_err(database_error)?;
+    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
+        registered_asset.asset_id,
+        archived.archive_path.clone(),
+        archived.original_filename.clone(),
+    ) {
+        Ok(asset) => Arc::new(asset),
+        Err(error) => return Err(error),
+    };
+    let validation = runtime
+        .validate_source(&source_module, Arc::clone(&asset), limits)
+        .await
+        .map_err(|error| IngestionError::AssetFailure {
+            code: error.code().to_owned(),
+            detail: error.detail().to_owned(),
+        })?;
+    let (module_version, _, _) = source_metadata(&source_module)?;
     let attempt_id = Uuid::new_v4();
     let attempt = AttemptIdentity {
         attempt_id,
@@ -838,10 +885,15 @@ async fn import_archived_asset(
         source_module_id: archived.source_module_id.clone(),
         source_module_version: module_version,
         source_module_package_sha256: source_module.package_hash.clone(),
-        source_api_version,
-        mapping_version,
-        schema_fingerprint: format!("module:{}", source_module.package_hash),
-        logical_snapshot_key: infer_logical_key(&source_module.module_id, &source_module, None)?,
+        source_api_version: validation.source_api_version.to_string(),
+        mapping_version: validation.mapping_version.to_string(),
+        schema_fingerprint: validation.schema_fingerprint,
+        logical_snapshot_key: LogicalSnapshotKey::new(validation.logical_snapshot_key).map_err(
+            |error| IngestionError::AssetFailure {
+                code: error.code().to_owned(),
+                detail: error.to_string(),
+            },
+        )?,
         started_at: archived.received_at.clone(),
     };
     database
@@ -853,14 +905,6 @@ async fn import_archived_asset(
     {
         *last_attempt_id = Some(attempt_id);
     }
-    let asset: Arc<dyn ReadOnlyAsset> = match FileAsset::open(
-        registered_asset.asset_id,
-        archived.archive_path.clone(),
-        archived.original_filename.clone(),
-    ) {
-        Ok(asset) => Arc::new(asset),
-        Err(error) => return Err(fail_attempt_and_return(&database, attempt_id, error).await),
-    };
     let batch = match runtime.invoke_source(&source_module, asset, limits).await {
         Ok(batch) => batch,
         Err(error) => {
@@ -956,65 +1000,125 @@ fn source_metadata(module: &InstalledModule) -> Result<(String, String, String),
     }
 }
 
-fn infer_logical_key(
-    module_id: &ModuleId,
-    _module: &InstalledModule,
-    year: Option<i32>,
-) -> Result<LogicalSnapshotKey, IngestionError> {
-    LogicalSnapshotKey::new(match year {
-        Some(year) => format!("{module_id}:{year}"),
-        None => format!("{module_id}:default"),
-    })
-    .map_err(|error| IngestionError::AssetFailure {
-        code: error.code().to_owned(),
-        detail: error.to_string(),
-    })
-}
-
 fn build_validated_batch(
     attempt: &AttemptIdentity,
     archived: &mfa_archive::ArchivedAsset,
     module: &InstalledModule,
     batch: SourceBatch,
 ) -> Result<ValidatedSnapshotBatch, IngestionError> {
-    let mapping_version = source_metadata(module)?.2;
-    let mut source_records = Vec::with_capacity(batch.records.len().max(1));
-    let mut observations = batch.records;
-    let mut lineage = Vec::new();
-    let mut used_ids = std::collections::HashSet::new();
-    for (index, observation) in observations.iter_mut().enumerate() {
-        let raw_id = observation_source_id(observation).unwrap_or_else(|| format!("row-{index}"));
-        let mut source_record_id = format!("{}:{raw_id}", archived.asset_id);
-        if !used_ids.insert(source_record_id.clone()) {
-            source_record_id = format!("{source_record_id}:{index}");
-            used_ids.insert(source_record_id.clone());
+    let mut source_records = Vec::with_capacity(batch.source_records.len());
+    let mut source_record_ids = std::collections::HashMap::new();
+    for (index, source_record) in batch.source_records.into_iter().enumerate() {
+        let source_record_id = format!("{}:source:{index}", attempt.asset_id);
+        if source_record_ids
+            .insert(
+                source_record.source_record_key.clone(),
+                source_record_id.clone(),
+            )
+            .is_some()
+        {
+            return Err(IngestionError::AssetFailure {
+                code: "source_record_identity_invalid".to_owned(),
+                detail: "guest source record keys must be unique".to_owned(),
+            });
         }
-        set_observation_source_id(observation, source_record_id.clone());
         source_records.push(SourceRecord {
-            source_record_id: source_record_id.clone(),
-            sheet_name: Some(archived.original_filename.clone()),
-            source_row_number: (index + 1) as u32,
-            source_record_key: format!(
-                "{}:{}:{}",
-                archived.asset_id,
-                archived.original_filename,
-                index + 1
-            ),
-            raw_payload: serde_json::to_value(&*observation).map_err(|error| {
-                IngestionError::AssetFailure {
-                    code: "source_record_serialization".to_owned(),
-                    detail: error.to_string(),
-                }
-            })?,
-        });
-        let (entity_type, entity_id) = mfa_db::provenance::canonical_entity_key(observation);
-        lineage.push(LineageLink {
-            canonical_entity_type: entity_type,
-            canonical_entity_id: entity_id,
             source_record_id,
-            mapping_version: mapping_version.clone(),
+            sheet_name: source_record.sheet_name,
+            source_row_number: source_record.source_row_number,
+            source_record_key: source_record.source_record_key,
+            raw_payload: source_record.raw_payload,
         });
     }
+    let mut observations = batch.records;
+    let mut activity_day_source_dates = std::collections::HashMap::new();
+    let lineage_source_keys = batch
+        .lineage
+        .iter()
+        .map(|hook| {
+            (
+                (
+                    hook.canonical_entity_type.clone(),
+                    hook.canonical_entity_id.clone(),
+                ),
+                hook.source_record_key.clone(),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut lineage_source_keys_by_type = batch.lineage.iter().fold(
+        std::collections::HashMap::<String, std::collections::VecDeque<String>>::new(),
+        |mut grouped, hook| {
+            grouped
+                .entry(hook.canonical_entity_type.clone())
+                .or_default()
+                .push_back(hook.source_record_key.clone());
+            grouped
+        },
+    );
+    for observation in &mut observations {
+        let source_record_key = observation_source_id(observation)
+            .or_else(|| {
+                observation_entity_key(observation)
+                    .and_then(|key| lineage_source_keys.get(&key).cloned())
+            })
+            .or_else(|| {
+                observation_entity_type(observation).and_then(|entity_type| {
+                    lineage_source_keys_by_type
+                        .get_mut(&entity_type)
+                        .and_then(std::collections::VecDeque::pop_front)
+                })
+            })
+            .ok_or_else(|| IngestionError::AssetFailure {
+                code: "source_record_reference_missing".to_owned(),
+                detail: "canonical observations must reference a guest source record key"
+                    .to_owned(),
+            })?;
+        let source_record_id = source_record_ids
+            .get(&source_record_key)
+            .cloned()
+            .ok_or_else(|| IngestionError::AssetFailure {
+                code: "source_record_reference_invalid".to_owned(),
+                detail: format!("unknown guest source record key {source_record_key}"),
+            })?;
+        if let CanonicalObservation::ActivityDay(value) = observation {
+            activity_day_source_dates
+                .insert(source_record_id.clone(), value.local_date.to_string());
+        }
+        set_observation_source_id(observation, source_record_id);
+    }
+    observations = coalesce_activity_days(observations);
+
+    let lineage = batch
+        .lineage
+        .into_iter()
+        .map(|hook| {
+            let source_record_id = source_record_ids
+                .get(&hook.source_record_key)
+                .cloned()
+                .ok_or_else(|| IngestionError::AssetFailure {
+                    code: "lineage_source_record_invalid".to_owned(),
+                    detail: format!("unknown guest source record key {}", hook.source_record_key),
+                })?;
+            let canonical_entity_type = match hook.canonical_entity_type.as_str() {
+                "heart_rate" => "heart_rate_observation".to_owned(),
+                _ => hook.canonical_entity_type.clone(),
+            };
+            let canonical_entity_id = if canonical_entity_type == "activity_day" {
+                activity_day_source_dates
+                    .get(&source_record_id)
+                    .cloned()
+                    .unwrap_or(hook.canonical_entity_id)
+            } else {
+                hook.canonical_entity_id
+            };
+            Ok(LineageLink {
+                canonical_entity_type,
+                canonical_entity_id,
+                source_record_id,
+                mapping_version: hook.mapping_version.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>, IngestionError>>()?;
 
     let issues = batch
         .issues
@@ -1036,20 +1140,29 @@ fn build_validated_batch(
         .extensions
         .into_iter()
         .enumerate()
-        .map(|(index, extension)| ExtensionRecord {
-            extension_record_id: format!("{}:extension:{index}", attempt.attempt_id),
-            source_record_id: source_records
-                .first()
-                .map(|record| record.source_record_id.clone())
-                .unwrap_or_else(|| format!("{}:extension-source:{index}", attempt.attempt_id)),
-            source_module_id: module.module_id.clone(),
-            contract_id: format!("{}@{}", extension.namespace, extension.contract_version),
-            contract_version: extension.contract_version.to_string(),
-            occurred_local_at: None,
-            local_date: None,
-            payload: extension.payload,
+        .map(|(index, extension)| {
+            let source_record_id = source_record_ids
+                .get(&extension.source_record_key)
+                .cloned()
+                .ok_or_else(|| IngestionError::AssetFailure {
+                    code: "extension_source_record_invalid".to_owned(),
+                    detail: format!(
+                        "unknown guest source record key {}",
+                        extension.source_record_key
+                    ),
+                })?;
+            Ok(ExtensionRecord {
+                extension_record_id: format!("{}:extension:{index}", attempt.attempt_id),
+                source_record_id,
+                source_module_id: module.module_id.clone(),
+                contract_id: format!("{}@{}", extension.namespace, extension.contract_version),
+                contract_version: extension.contract_version.to_string(),
+                occurred_local_at: extension.occurred_local_at,
+                local_date: extension.local_date,
+                payload: extension.payload,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, IngestionError>>()?;
     Ok(ValidatedSnapshotBatch {
         logical_key: attempt.logical_snapshot_key.clone(),
         attempt: attempt.clone(),
@@ -1065,21 +1178,74 @@ fn extension_contracts(
     batch: &ValidatedSnapshotBatch,
     module: &InstalledModule,
 ) -> Result<Vec<ExtensionContractRegistration>, IngestionError> {
-    Ok(batch
+    let manifest = match &module.manifest {
+        ModuleManifest::Source(manifest) => manifest,
+        _ => {
+            return Err(IngestionError::AssetFailure {
+                code: "source_module_type_mismatch".to_owned(),
+                detail: "source module manifest required".to_owned(),
+            });
+        }
+    };
+    batch
         .extensions
         .iter()
-        .map(|extension| ExtensionContractRegistration {
-            contract_id: extension.contract_id.clone(),
-            source_module_id: module.module_id.clone(),
-            namespace: extension
-                .contract_id
-                .split_once('@')
-                .map(|(namespace, _)| namespace.to_owned())
-                .unwrap_or_else(|| extension.contract_id.clone()),
-            contract_version: extension.contract_version.clone(),
-            payload_schema: json!({}),
+        .map(|extension| {
+            let (namespace, _) = extension.contract_id.split_once('@').ok_or_else(|| {
+                IngestionError::AssetFailure {
+                    code: "extension_contract_invalid".to_owned(),
+                    detail: extension.contract_id.clone(),
+                }
+            })?;
+            let contract = manifest
+                .extension_contracts
+                .iter()
+                .find(|contract| {
+                    contract.namespace == namespace
+                        && contract.contract_version.to_string() == extension.contract_version
+                })
+                .ok_or_else(|| IngestionError::AssetFailure {
+                    code: "extension_contract_undeclared".to_owned(),
+                    detail: extension.contract_id.clone(),
+                })?;
+            Ok(ExtensionContractRegistration {
+                contract_id: extension.contract_id.clone(),
+                source_module_id: module.module_id.clone(),
+                namespace: namespace.to_owned(),
+                contract_version: extension.contract_version.clone(),
+                payload_schema: contract.payload_schema.clone(),
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>, IngestionError>>()
+}
+
+fn coalesce_activity_days(observations: Vec<CanonicalObservation>) -> Vec<CanonicalObservation> {
+    let mut result = Vec::with_capacity(observations.len());
+    let mut activity_days = std::collections::HashMap::new();
+    for observation in observations {
+        let CanonicalObservation::ActivityDay(day) = observation else {
+            result.push(observation);
+            continue;
+        };
+        if let Some(index) = activity_days.get(&day.local_date).copied() {
+            let CanonicalObservation::ActivityDay(existing) = &mut result[index] else {
+                unreachable!("activity day index points to a different observation");
+            };
+            existing.steps = existing.steps.or(day.steps);
+            existing.water_ml = match (existing.water_ml, day.water_ml) {
+                (Some(existing), Some(incoming)) => Some(existing + incoming),
+                (existing, incoming) => existing.or(incoming),
+            };
+            existing.heart_rate_observation_count += day.heart_rate_observation_count;
+            existing.activity_duration_seconds += day.activity_duration_seconds;
+            existing.activity_distance_km += day.activity_distance_km;
+            existing.estimated_activity_calories_kcal += day.estimated_activity_calories_kcal;
+        } else {
+            activity_days.insert(day.local_date, result.len());
+            result.push(CanonicalObservation::ActivityDay(day));
+        }
+    }
+    result
 }
 
 fn observation_source_id(observation: &CanonicalObservation) -> Option<String> {
@@ -1093,6 +1259,34 @@ fn observation_source_id(observation: &CanonicalObservation) -> Option<String> {
         | CanonicalObservation::WorkoutSession(_)
         | CanonicalObservation::PhaseEvent(_) => None,
     }
+}
+
+fn observation_entity_key(observation: &CanonicalObservation) -> Option<(String, String)> {
+    Some(match observation {
+        CanonicalObservation::ActivityDay(value) => {
+            ("activity_day".to_owned(), value.local_date.to_string())
+        }
+        CanonicalObservation::WorkoutSession(value) => (
+            "workout_session".to_owned(),
+            value.workout_session_id.to_string(),
+        ),
+        CanonicalObservation::PhaseEvent(value) => {
+            ("phase_event".to_owned(), value.phase_event_id.to_string())
+        }
+        _ => return None,
+    })
+}
+
+fn observation_entity_type(observation: &CanonicalObservation) -> Option<String> {
+    Some(
+        match observation {
+            CanonicalObservation::ActivityDay(_) => "activity_day",
+            CanonicalObservation::WorkoutSession(_) => "workout_session",
+            CanonicalObservation::PhaseEvent(_) => "phase_event",
+            _ => return None,
+        }
+        .to_owned(),
+    )
 }
 
 fn set_observation_source_id(observation: &mut CanonicalObservation, source_record_id: String) {

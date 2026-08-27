@@ -42,6 +42,8 @@ pub enum PackageError {
     EntrypointHashMismatch,
     #[error("module entrypoint payload hash is invalid")]
     EntrypointHashInvalid,
+    #[error("module is incompatible with the running app version")]
+    IncompatibleAppVersion,
     #[error("source API version is incompatible with this host")]
     IncompatibleSourceApi,
     #[error("dashboard API version is incompatible with this host")]
@@ -58,6 +60,8 @@ pub enum PackageError {
     InstalledModuleCorrupt { path: PathBuf },
     #[error("atomic installation failed: {detail}")]
     AtomicInstall { detail: String },
+    #[error("atomic uninstall failed: {detail}")]
+    AtomicUninstall { detail: String },
     #[error("mutable module state is invalid: {detail}")]
     StateInvalid { detail: String },
 }
@@ -84,6 +88,7 @@ impl PackageError {
             Self::EntrypointMissing => "entrypoint_missing",
             Self::EntrypointHashMismatch => "entrypoint_hash_mismatch",
             Self::EntrypointHashInvalid => "entrypoint_hash_invalid",
+            Self::IncompatibleAppVersion => "incompatible_app_version",
             Self::IncompatibleSourceApi => "incompatible_source_api",
             Self::IncompatibleDashboardApi => "incompatible_dashboard_api",
             Self::IncompatiblePackageFormat => "incompatible_package_format",
@@ -92,6 +97,7 @@ impl PackageError {
             Self::NoActiveModule { .. } => "no_active_module",
             Self::InstalledModuleCorrupt { .. } => "installed_module_corrupt",
             Self::AtomicInstall { .. } => "atomic_install_failed",
+            Self::AtomicUninstall { .. } => "atomic_uninstall_failed",
             Self::StateInvalid { .. } => "state_invalid",
         }
     }

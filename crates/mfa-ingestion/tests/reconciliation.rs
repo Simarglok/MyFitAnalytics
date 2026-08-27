@@ -189,7 +189,7 @@ async fn startup_and_refresh_reconcile_archive_only_assets_into_active_snapshots
         .unwrap();
     let first = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();
@@ -202,7 +202,7 @@ async fn startup_and_refresh_reconcile_archive_only_assets_into_active_snapshots
         .unwrap();
     let second = database
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();

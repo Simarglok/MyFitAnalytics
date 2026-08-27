@@ -59,9 +59,9 @@ Desktop lifecycle and release
 
 **Plan:** [2026-08-25-myfitanalytics-source-modules.md](./2026-08-25-myfitanalytics-source-modules.md)
 
-**Delivers:** MyNetDiary `.xls` and Hevy CSV guest components, real contract fixtures, canonical observations, extension records, mapping warnings, module manifests, English namespaces, build/package scripts, and source contract conformance tests.
+**Delivers:** MyNetDiary `.xls` and Hevy CSV guest components, real contract fixtures, canonical observations, extension records, mapping warnings, module manifests, English namespaces, build/package scripts, source contract conformance tests, native workspace/package pickers, and a minimal Settings workflow for installing, updating, enabling, disabling, and uninstalling module packages without rebuild or restart.
 
-**Acceptance gate:** Original-format MyNetDiary and Hevy fixtures import through the same Wasmtime and ingestion boundaries used in production; expected canonical rows, lineage, warnings, replacement semantics, and active-provider behavior are proven by integration tests.
+**Acceptance gate:** Original-format MyNetDiary and Hevy fixtures import through the same Wasmtime and ingestion boundaries used in production; expected canonical rows, lineage, warnings, replacement semantics, and active-provider behavior are proven by integration tests. In a packaged macOS application, the user can choose a workspace and install, disable, re-enable, and uninstall a module through Settings without rebuilding or restarting the application.
 
 ## Plan 4 — Analytics and Dashboard UI
 
@@ -69,7 +69,7 @@ Desktop lifecycle and release
 
 **Plan:** [2026-08-25-myfitanalytics-analytics-ui.md](./2026-08-25-myfitanalytics-analytics-ui.md)
 
-**Delivers:** Deterministic analytics queries, coverage and availability resolver, base dashboard component, typed dashboard view model, Overview/Body/Nutrition/Activity/Strength/Sources pages, Settings module management, data quality, refresh progress, localization, and frontend accessibility tests.
+**Delivers:** Deterministic analytics queries, coverage and availability resolver, base dashboard component, typed dashboard view model, Overview/Body/Nutrition/Activity/Strength/Sources pages, provider selection and dependency-aware extensions to the existing Settings module management, data quality, refresh progress, localization, and frontend accessibility tests.
 
 **Acceptance gate:** Golden datasets produce approved weight, nutrition, activity, strength, and TDEE results; every graph shows either typed ready data or a precise non-ready state; the Svelte application renders the complete base dashboard from mock and real Tauri transports.
 

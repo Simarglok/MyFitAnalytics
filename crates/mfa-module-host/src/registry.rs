@@ -9,12 +9,12 @@ pub trait ModuleRegistry {
 
 impl ModuleRegistry for PackageInstaller {
     fn list(&self) -> Result<Vec<InstalledModule>, PackageError> {
-        self.reconstruct_registry()
+        self.current_registry()
     }
 
     fn resolve_active(&self, id: &ModuleId) -> Result<InstalledModule, PackageError> {
         let mut candidates: Vec<_> = self
-            .reconstruct_registry()?
+            .current_registry()?
             .into_iter()
             .filter(|module| &module.module_id == id && module.enabled)
             .collect();

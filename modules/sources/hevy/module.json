@@ -1,0 +1,25 @@
+{
+  "module_type": "source",
+  "module_id": "hevy",
+  "module_version": "1.0.0",
+  "package_format_version": "1.0.0",
+  "source_api_version": "1.0.0",
+  "mapping_version": "1.0.0",
+  "compatible_app_versions": [">=0.1.0"],
+  "provided_capabilities": ["body.weight", "body.fat_percentage", "strength.sessions", "strength.sets"],
+  "accepted_file_patterns": ["*.csv", "text/csv"],
+  "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+  "extension_contracts": [
+    {
+      "namespace": "hevy.body-circumference",
+      "contract_version": "1.0.0",
+      "payload_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    }
+  ],
+  "settings_schema": {},
+  "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "localization_namespace": "source.hevy"
+}

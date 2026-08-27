@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 jsonschema.workspace = true
 mfa-config = { path = "../mfa-config" }
@@ -20,4 +23,5 @@ wasmtime.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+mfa-module-host = { path = ".", features = ["test-support"] }
 tempfile.workspace = true

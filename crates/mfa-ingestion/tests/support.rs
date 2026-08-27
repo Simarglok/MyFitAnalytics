@@ -1,6 +1,7 @@
 use mfa_contracts::{
-    CanonicalObservation, CapabilityId, ModuleId, ModuleManifest, ModuleType, NutritionItem,
-    SourceBatch, SourceManifest,
+    CanonicalObservation, CapabilityId, LineageHook, ModuleId, ModuleManifest, ModuleType,
+    NutritionItem, SourceBatch, SourceExtensionContract, SourceManifest, SourceRecord,
+    SourceValidation,
 };
 use mfa_ingestion::{BoxFuture, SourceInvoker};
 use mfa_module_host::{InstalledModule, RuntimeError, RuntimeLimits};
@@ -15,6 +16,25 @@ pub struct FakeRuntime {
 }
 
 impl SourceInvoker for FakeRuntime {
+    fn validate_source<'a>(
+        &'a self,
+        _module: &'a InstalledModule,
+        _asset: Arc<dyn mfa_contracts::ReadOnlyAsset>,
+        _limits: RuntimeLimits,
+    ) -> BoxFuture<'a, Result<SourceValidation, RuntimeError>> {
+        Box::pin(async move {
+            Ok(SourceValidation {
+                valid: true,
+                issues: Vec::new(),
+                source_module_id: self.batch.source_module_id.clone(),
+                source_api_version: self.batch.source_api_version.clone(),
+                logical_snapshot_key: self.batch.logical_snapshot_key.clone(),
+                schema_fingerprint: self.batch.schema_fingerprint.clone(),
+                mapping_version: self.batch.mapping_version.clone(),
+            })
+        })
+    }
+
     fn invoke_source<'a>(
         &'a self,
         _module: &'a InstalledModule,
@@ -54,6 +74,25 @@ impl FakeRuntime {
 
 pub fn nutrition_batch() -> SourceBatch {
     SourceBatch {
+        contract_version: "1.0.0".parse().unwrap(),
+        source_module_id: "fixture-source".to_owned(),
+        source_api_version: "1.0.0".parse().unwrap(),
+        mapping_version: "1.0.0".parse().unwrap(),
+        schema_fingerprint:
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+        logical_snapshot_key: "fixture:2026".to_owned(),
+        source_records: vec![SourceRecord {
+            source_record_key: "source-1".to_owned(),
+            sheet_name: None,
+            source_row_number: 1,
+            raw_payload: serde_json::json!({"fixture": true}),
+        }],
+        lineage: vec![LineageHook {
+            canonical_entity_type: "nutrition_item".to_owned(),
+            canonical_entity_id: "00000000-0000-0000-0000-0000000002bc".to_owned(),
+            source_record_key: "source-1".to_owned(),
+            mapping_version: "1.0.0".parse().unwrap(),
+        }],
         records: vec![CanonicalObservation::NutritionItem(NutritionItem {
             nutrition_item_id: Uuid::from_u128(700),
             occurred_local_at: None,
@@ -96,6 +135,13 @@ pub fn fake_module(temp: &tempfile::TempDir, id: ModuleId) -> InstalledModule {
             compatible_app_versions: vec![">=0.1.0".to_owned()],
             provided_capabilities: vec![CapabilityId::try_from("nutrition.items").unwrap()],
             accepted_file_patterns: vec!["*.fixture".to_owned()],
+            artifact_signatures: vec!["sha256:fixture-entrypoint".to_owned()],
+            extension_contracts: vec![SourceExtensionContract {
+                namespace: "fixture.extension".to_owned(),
+                contract_version: "1.0.0".parse().unwrap(),
+                payload_schema: serde_json::json!({"type": "object"}),
+            }],
+            settings_schema: serde_json::json!({}),
             entrypoint_hash: "sha256:fixture-entrypoint".to_owned(),
             localization_namespace: "source.fixture".to_owned(),
         }),

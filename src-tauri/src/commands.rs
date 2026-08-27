@@ -1,10 +1,11 @@
+use crate::dialogs::{DialogPort, NativeDialogPort};
 use crate::state::{AppState, AppStateError};
-use mfa_contracts::ModuleManifest;
+use mfa_contracts::{CapabilityId, ModuleId, ModuleManifest, ModuleType};
 use mfa_db::{HealthCheck, ListQualityItems};
 use mfa_ingestion::{HealthSnapshot, HealthState, IngestionCoordinator, RecoveryMode, now_request};
+use mfa_module_host::{InstalledModule, PackageInstaller, UninstallTransaction};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +25,18 @@ pub struct ModuleView {
     pub version: String,
     pub enabled: bool,
     pub localization_namespace: String,
+    pub display_name: String,
+    pub provided_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleCatalogEntryView {
+    pub module: ModuleView,
+    pub origin: String,
+    pub install_state: String,
+    pub available_version: Option<String>,
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,40 +137,503 @@ pub async fn get_bootstrap_state_inner(state: &AppState) -> Result<BootstrapStat
 }
 
 pub async fn list_modules_inner(state: &AppState) -> Result<Vec<ModuleView>, CommandError> {
-    Ok(state
-        .modules()
-        .iter()
-        .map(|module| ModuleView {
-            id: module.module_id.to_string(),
-            module_type: match module.module_type {
-                mfa_contracts::ModuleType::Source => "source",
-                mfa_contracts::ModuleType::Dashboard => "dashboard",
-                mfa_contracts::ModuleType::Locale => "locale",
-            }
-            .to_owned(),
-            version: module.module_version.to_string(),
-            enabled: module.enabled,
-            localization_namespace: localization_namespace(&module.manifest),
-        })
-        .collect())
+    Ok(state.modules().iter().map(module_view).collect())
 }
 
-pub async fn set_workspace_root_inner(
+fn module_view(module: &InstalledModule) -> ModuleView {
+    let provided_capabilities = match &module.manifest {
+        ModuleManifest::Source(manifest) => manifest
+            .provided_capabilities
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    };
+    ModuleView {
+        id: module.module_id.to_string(),
+        module_type: match module.module_type {
+            ModuleType::Source => "source",
+            ModuleType::Dashboard => "dashboard",
+            ModuleType::Locale => "locale",
+        }
+        .to_owned(),
+        version: module.module_version.to_string(),
+        enabled: module.enabled,
+        localization_namespace: localization_namespace(&module.manifest),
+        display_name: display_name(&module.module_id),
+        provided_capabilities,
+    }
+}
+
+fn display_name(module_id: &ModuleId) -> String {
+    match module_id.as_str() {
+        "hevy" => "Hevy".to_owned(),
+        "mynetdiary" => "MyNetDiary".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+pub async fn list_module_catalog_inner(
     state: &AppState,
-    path: String,
-) -> Result<WorkspaceView, CommandError> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(CommandError {
-            code: "invalid_workspace_root".to_owned(),
-            message: "workspace root must not be empty".to_owned(),
+) -> Result<Vec<ModuleCatalogEntryView>, CommandError> {
+    let installer = state.package_installer();
+    let mut latest_modules = BTreeMap::new();
+    for module in state.modules() {
+        latest_modules
+            .entry(module.module_id.clone())
+            .and_modify(|current: &mut InstalledModule| {
+                if module.module_version > current.module_version {
+                    *current = module.clone();
+                }
+            })
+            .or_insert(module);
+    }
+    let modules: Vec<InstalledModule> = latest_modules.into_values().collect();
+    let bundled = state.bundled_packages();
+    let mut entries = Vec::new();
+    let mut installed_ids = BTreeMap::new();
+
+    for module in &modules {
+        installed_ids.insert(module.module_id.clone(), ());
+        let bundled_path = bundled.get(&module.module_id);
+        let inspected = bundled_path.and_then(|path| installer.inspect(path).ok());
+        let bundled_error = bundled_path
+            .and_then(|path| installer.inspect(path).err())
+            .map(|error| error.code().to_owned());
+        let inspect_error = installer
+            .installed_app_compatibility_error(module)
+            .map(str::to_owned)
+            .or(bundled_error);
+        let available_version = inspected.as_ref().and_then(|package| {
+            let version = manifest_version(&package.manifest);
+            (*version > module.module_version).then(|| version.to_string())
+        });
+        let install_state = catalog_install_state(
+            inspect_error.as_deref(),
+            available_version.is_some(),
+            module.enabled,
+        );
+        entries.push(ModuleCatalogEntryView {
+            module: module_view(module),
+            origin: if bundled_path.is_some() {
+                "bundled".to_owned()
+            } else {
+                "installed".to_owned()
+            },
+            install_state: install_state.to_owned(),
+            available_version,
+            error_code: inspect_error,
         });
     }
+
+    for (module_id, package_path) in bundled {
+        if installed_ids.contains_key(&module_id) {
+            continue;
+        }
+        match installer.inspect(&package_path) {
+            Ok(package) => {
+                let module = module_view_from_manifest(&package.manifest, false);
+                entries.push(ModuleCatalogEntryView {
+                    module,
+                    origin: "bundled".to_owned(),
+                    install_state: "available".to_owned(),
+                    available_version: Some(manifest_version(&package.manifest).to_string()),
+                    error_code: None,
+                });
+            }
+            Err(error) => {
+                let module = ModuleView {
+                    id: module_id.to_string(),
+                    module_type: "source".to_owned(),
+                    version: "unknown".to_owned(),
+                    enabled: false,
+                    localization_namespace: format!("source.{}", module_id),
+                    display_name: display_name(&module_id),
+                    provided_capabilities: Vec::new(),
+                };
+                entries.push(ModuleCatalogEntryView {
+                    module,
+                    origin: "bundled".to_owned(),
+                    install_state: catalog_install_state_for_inspect_error(error.code()).to_owned(),
+                    available_version: None,
+                    error_code: Some(error.code().to_owned()),
+                });
+            }
+        }
+    }
+    Ok(entries)
+}
+
+pub async fn choose_workspace_root_inner(
+    state: &AppState,
+    dialogs: &dyn DialogPort,
+) -> Result<Option<WorkspaceView>, CommandError> {
+    let Some(path) = dialogs.pick_workspace_root() else {
+        return Ok(None);
+    };
     state
-        .configure_workspace(PathBuf::from(trimmed))
+        .configure_workspace(path)
         .await
         .map_err(CommandError::from)?;
+    workspace_view(state).map(Some)
+}
+
+pub async fn get_workspace_view_inner(state: &AppState) -> Result<WorkspaceView, CommandError> {
     workspace_view(state)
+}
+
+pub async fn choose_and_install_module_inner(
+    state: &AppState,
+    dialogs: &dyn DialogPort,
+) -> Result<Option<ModuleView>, CommandError> {
+    let Some(path) = dialogs.pick_module_package() else {
+        return Ok(None);
+    };
+    state
+        .install_package(&path)
+        .await
+        .map(|module| Some(module_view(&module)))
+        .map_err(CommandError::from)
+}
+
+pub async fn choose_source_inbox_inner(
+    state: &AppState,
+    module_id: String,
+    dialogs: &dyn DialogPort,
+) -> Result<Option<WorkspaceView>, CommandError> {
+    let module_id = parse_module_id(&module_id)?;
+    if !state
+        .modules()
+        .iter()
+        .any(|module| module.module_id == module_id)
+    {
+        return Err(command_error(
+            "module_not_found",
+            "source module is not installed",
+        ));
+    }
+    let Some(path) = dialogs.pick_source_inbox(&module_id) else {
+        return Ok(None);
+    };
+    std::fs::create_dir_all(&path).map_err(|error| {
+        command_error(
+            "inbox_unavailable",
+            &format!("could not create inbox: {error}"),
+        )
+    })?;
+    let previous = state.settings();
+    let mut settings = previous.clone();
+    settings.source_inbox_roots.insert(module_id.clone(), path);
+    state.save_settings(settings).map_err(CommandError::from)?;
+    if let Err(error) = state.reconfigure_source(&module_id).await {
+        if let Err(rollback_error) = state.save_settings(previous) {
+            return Err(command_error(
+                "inbox_rollback_failed",
+                &format!("{error}; restoring settings failed: {rollback_error}"),
+            ));
+        }
+        if let Err(rollback_error) = state.reconfigure_source(&module_id).await {
+            return Err(command_error(
+                "inbox_rollback_failed",
+                &format!("{error}; restoring runtime failed: {rollback_error}"),
+            ));
+        }
+        return Err(error.into());
+    }
+    workspace_view(state).map(Some)
+}
+
+pub async fn set_module_enabled_inner(
+    state: &AppState,
+    module_id: String,
+    enabled: bool,
+) -> Result<ModuleView, CommandError> {
+    let module_id = parse_module_id(&module_id)?;
+    let previous = state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id == module_id)
+        .ok_or_else(|| command_error("module_not_found", "module is not installed"))?;
+    if enabled && state.settings().workspace_root.is_none() {
+        return Err(command_error(
+            "workspace_required",
+            "configure a workspace before enabling a source",
+        ));
+    }
+    let installer = state.package_installer();
+    installer
+        .set_enabled(&module_id, enabled)
+        .map_err(|error| command_error(error.code(), &error.to_string()))?;
+    if let Err(error) = state.refresh_registry() {
+        let _ = installer.set_enabled(&module_id, previous.enabled);
+        let _ = state.refresh_registry();
+        return Err(error.into());
+    }
+    let reconfigure_result = if previous.module_type == ModuleType::Source {
+        state.reconfigure_source(&module_id).await
+    } else {
+        Ok(())
+    };
+    if let Err(error) = reconfigure_result {
+        let _ = installer.set_enabled(&module_id, previous.enabled);
+        let _ = state.refresh_registry();
+        let _ = state.reconfigure_source(&module_id).await;
+        return Err(error.into());
+    }
+    state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id == module_id)
+        .map(|module| module_view(&module))
+        .ok_or_else(|| command_error("module_not_found", "module is not installed"))
+}
+
+pub async fn uninstall_module_inner(
+    state: &AppState,
+    module_id: String,
+) -> Result<(), CommandError> {
+    let module_id = parse_module_id(&module_id)?;
+    let module = state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id == module_id)
+        .ok_or_else(|| command_error("module_not_found", "module is not installed"))?;
+    if module.enabled {
+        return Err(command_error(
+            "module_must_be_disabled",
+            "disable the module before uninstalling it",
+        ));
+    }
+    let previous = state.settings();
+    let mut settings = previous.clone();
+    settings
+        .active_providers
+        .retain(|_, selected| selected != &module_id);
+    let installer = state.uninstall_package_installer();
+    let mut transaction = installer
+        .stage_uninstall(&module_id)
+        .map_err(|error| command_error(error.code(), &error.to_string()))?;
+    if let Err(error) = state.save_settings(settings) {
+        let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
+        return Err(rollback.unwrap_or_else(|| error.into()));
+    }
+    if let Err(error) = installer.apply_uninstall(&mut transaction) {
+        let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
+        return Err(rollback.unwrap_or_else(|| command_error(error.code(), &error.to_string())));
+    }
+    if let Err(error) = state.refresh_registry_during_uninstall(&installer) {
+        let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
+        return Err(rollback.unwrap_or_else(|| error.into()));
+    }
+    let reconfigure_result = if module.module_type == ModuleType::Source {
+        state.reconfigure_source(&module_id).await
+    } else {
+        Ok(())
+    };
+    if let Err(error) = reconfigure_result {
+        let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
+        let runtime_rollback = state.reconfigure_source(&module_id).await;
+        if let Some(rollback) = rollback {
+            return Err(rollback);
+        }
+        if let Err(runtime_error) = runtime_rollback {
+            return Err(command_error(
+                "uninstall_rollback_failed",
+                &format!("{error}; restoring runtime failed: {runtime_error}"),
+            ));
+        }
+        return Err(error.into());
+    }
+    if let Err(error) = installer.finalize_uninstall(&mut transaction) {
+        let rollback = rollback_uninstall(state, &installer, &mut transaction, &previous);
+        return Err(rollback.unwrap_or_else(|| command_error(error.code(), &error.to_string())));
+    }
+    Ok(())
+}
+
+pub async fn update_module_inner(
+    state: &AppState,
+    module_id: String,
+) -> Result<ModuleView, CommandError> {
+    let module_id = parse_module_id(&module_id)?;
+    let package = state.bundled_packages().remove(&module_id).ok_or_else(|| {
+        command_error(
+            "module_update_unavailable",
+            "no bundled update is available",
+        )
+    })?;
+    state
+        .install_package(&package)
+        .await
+        .map(|module| module_view(&module))
+        .map_err(CommandError::from)
+}
+
+pub async fn select_module_provider_inner(
+    state: &AppState,
+    capability: String,
+    module_id: String,
+) -> Result<ProviderSelectionView, CommandError> {
+    let capability = CapabilityId::try_from(capability)
+        .map_err(|error| command_error("invalid_capability", &error.to_string()))?;
+    let module_id = parse_module_id(&module_id)?;
+    let resolution = state
+        .select_provider(capability, module_id)
+        .map_err(CommandError::from)?;
+    Ok(ProviderSelectionView {
+        active_providers: resolution
+            .active_providers
+            .into_iter()
+            .map(|(capability, module)| (capability.to_string(), module.to_string()))
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSelectionView {
+    pub active_providers: BTreeMap<String, String>,
+}
+
+fn rollback_uninstall(
+    state: &AppState,
+    installer: &PackageInstaller,
+    transaction: &mut UninstallTransaction,
+    previous_settings: &mfa_config::AppSettings,
+) -> Option<CommandError> {
+    let mut failures = Vec::new();
+    if let Err(error) = installer.rollback_uninstall(transaction) {
+        failures.push(error.to_string());
+    }
+    if let Err(error) = state.save_settings(previous_settings.clone()) {
+        failures.push(error.to_string());
+    }
+    if let Err(error) = state.refresh_registry() {
+        failures.push(error.to_string());
+    }
+    (!failures.is_empty()).then(|| command_error("uninstall_rollback_failed", &failures.join("; ")))
+}
+
+fn parse_module_id(value: &str) -> Result<ModuleId, CommandError> {
+    ModuleId::try_from(value.to_owned())
+        .map_err(|error| command_error("invalid_module_id", &error.to_string()))
+}
+
+fn command_error(code: &str, detail: &str) -> CommandError {
+    let message = match code {
+        "workspace_required" => "Configure a workspace before enabling this source.".to_owned(),
+        "module_must_be_disabled" => "Disable this module before uninstalling it.".to_owned(),
+        "module_update_unavailable" => "No update is available for this module.".to_owned(),
+        "module_not_found" => "This module is no longer installed.".to_owned(),
+        "inbox_unavailable" => "The selected inbox is not available.".to_owned(),
+        _ => detail.to_owned(),
+    };
+    CommandError {
+        code: code.to_owned(),
+        message,
+    }
+}
+
+fn module_view_from_manifest(manifest: &ModuleManifest, enabled: bool) -> ModuleView {
+    let (module_id, module_type, version, namespace, capabilities) = match manifest {
+        ModuleManifest::Source(manifest) => (
+            &manifest.module_id,
+            manifest.module_type,
+            &manifest.module_version,
+            &manifest.localization_namespace,
+            manifest
+                .provided_capabilities
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        ),
+        ModuleManifest::Dashboard(manifest) => (
+            &manifest.module_id,
+            manifest.module_type,
+            &manifest.module_version,
+            &manifest.localization_namespace,
+            Vec::new(),
+        ),
+        ModuleManifest::Locale(manifest) => (
+            &manifest.module_id,
+            manifest.module_type,
+            &manifest.module_version,
+            &manifest.localization_namespace,
+            Vec::new(),
+        ),
+    };
+    ModuleView {
+        id: module_id.to_string(),
+        module_type: match module_type {
+            ModuleType::Source => "source",
+            ModuleType::Dashboard => "dashboard",
+            ModuleType::Locale => "locale",
+        }
+        .to_owned(),
+        version: version.to_string(),
+        enabled,
+        localization_namespace: namespace.clone(),
+        display_name: display_name(module_id),
+        provided_capabilities: capabilities,
+    }
+}
+
+fn manifest_version(manifest: &ModuleManifest) -> &mfa_contracts::ContractVersion {
+    match manifest {
+        ModuleManifest::Source(manifest) => &manifest.module_version,
+        ModuleManifest::Dashboard(manifest) => &manifest.module_version,
+        ModuleManifest::Locale(manifest) => &manifest.module_version,
+    }
+}
+
+fn catalog_install_state(
+    inspect_error: Option<&str>,
+    has_available_version: bool,
+    enabled: bool,
+) -> &'static str {
+    match inspect_error {
+        Some(code) => catalog_install_state_for_inspect_error(code),
+        None if has_available_version => "update",
+        None if enabled => "enabled",
+        None => "disabled",
+    }
+}
+
+fn catalog_install_state_for_inspect_error(code: &str) -> &'static str {
+    if code.starts_with("incompatible_") {
+        "incompatible"
+    } else {
+        "error"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{catalog_install_state, catalog_install_state_for_inspect_error};
+
+    #[test]
+    fn incompatible_package_errors_have_an_explicit_catalog_state() {
+        assert_eq!(
+            catalog_install_state(Some("incompatible_source_api"), false, true),
+            "incompatible"
+        );
+        assert_eq!(
+            catalog_install_state(Some("incompatible_package_format"), false, false),
+            "incompatible"
+        );
+    }
+
+    #[test]
+    fn uninstalled_incompatible_inspect_errors_are_not_generic_errors() {
+        assert_eq!(
+            catalog_install_state_for_inspect_error("incompatible_source_api"),
+            "incompatible"
+        );
+        assert_eq!(
+            catalog_install_state_for_inspect_error("incompatible_app_version"),
+            "incompatible"
+        );
+    }
 }
 
 pub async fn refresh_now_inner(state: &AppState) -> Result<ScanTicketView, CommandError> {
@@ -203,7 +679,7 @@ pub async fn get_ingestion_status_inner(
         };
         (
             storage.database.clone(),
-            storage.coordinators.clone(),
+            storage.coordinators.values().cloned().collect::<Vec<_>>(),
             storage.recovery_gate.clone(),
             storage.database.queue_capacity(),
         )
@@ -312,7 +788,7 @@ fn storage_coordinators(state: &AppState) -> Result<Vec<IngestionCoordinator>, C
     let storage = state.storage_lock().map_err(CommandError::from)?;
     let coordinators = storage
         .as_ref()
-        .map(|storage| storage.coordinators.clone())
+        .map(|storage| storage.coordinators.values().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
     if coordinators.is_empty() {
         Err(CommandError {
@@ -341,7 +817,10 @@ fn workspace_view(state: &AppState) -> Result<WorkspaceView, CommandError> {
         .map(|storage| storage.workspace.root.clone())
         .or(settings.workspace_root)
         .unwrap_or_default();
-    let workspace = mfa_config::WorkspacePaths::new(&workspace_root);
+    let workspace = mfa_config::WorkspacePaths::with_source_inbox_roots(
+        &workspace_root,
+        settings.source_inbox_roots.clone(),
+    );
     let source_paths = state
         .modules()
         .iter()
@@ -412,11 +891,73 @@ pub async fn list_modules(
 }
 
 #[tauri::command]
-pub async fn set_workspace_root(
-    path: String,
+pub async fn list_module_catalog(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ModuleCatalogEntryView>, CommandError> {
+    list_module_catalog_inner(&state).await
+}
+
+#[tauri::command]
+pub async fn choose_workspace_root(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<WorkspaceView>, CommandError> {
+    choose_workspace_root_inner(&state, &NativeDialogPort).await
+}
+
+#[tauri::command]
+pub async fn get_workspace_view(
     state: tauri::State<'_, AppState>,
 ) -> Result<WorkspaceView, CommandError> {
-    set_workspace_root_inner(&state, path).await
+    get_workspace_view_inner(&state).await
+}
+
+#[tauri::command]
+pub async fn choose_and_install_module(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<ModuleView>, CommandError> {
+    choose_and_install_module_inner(&state, &NativeDialogPort).await
+}
+
+#[tauri::command]
+pub async fn choose_source_inbox(
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<WorkspaceView>, CommandError> {
+    choose_source_inbox_inner(&state, module_id, &NativeDialogPort).await
+}
+
+#[tauri::command]
+pub async fn set_module_enabled(
+    module_id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<ModuleView, CommandError> {
+    set_module_enabled_inner(&state, module_id, enabled).await
+}
+
+#[tauri::command]
+pub async fn update_module(
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ModuleView, CommandError> {
+    update_module_inner(&state, module_id).await
+}
+
+#[tauri::command]
+pub async fn uninstall_module(
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError> {
+    uninstall_module_inner(&state, module_id).await
+}
+
+#[tauri::command]
+pub async fn select_module_provider(
+    capability: String,
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProviderSelectionView, CommandError> {
+    select_module_provider_inner(&state, capability, module_id).await
 }
 
 #[tauri::command]

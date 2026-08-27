@@ -1,0 +1,144 @@
+wit_bindgen::generate!({
+    path: "../../sdk/wit/source-api.wit",
+    world: "source-module",
+});
+
+use mfa_contracts::{MappingIssue, SourceValidation};
+
+struct Component;
+
+export!(Component);
+
+impl Guest for Component {
+    fn metadata() -> String {
+        r#"{"module_id":"hevy","module_version":"1.0.0","source_api_version":"1.0.0","mapping_version":"1.0.0","provided_capabilities":["body.weight","body.fat_percentage","strength.sessions","strength.sets"],"extension_contracts":[{"namespace":"hevy.body-circumference","contract_version":"1.0.0"}],"localization_namespace":"source.hevy"}"#.to_owned()
+    }
+
+    fn contract_version() -> String {
+        "1.0.0".to_owned()
+    }
+
+    fn detect(asset: &AssetReader) -> u8 {
+        read_asset(asset)
+            .ok()
+            .and_then(|bytes| match probe(&bytes) {
+                Ok(_) => Some(100),
+                Err(_) => None,
+            })
+            .unwrap_or(0)
+    }
+
+    fn validate(asset: &AssetReader) -> Result<String, String> {
+        let metadata = asset.metadata();
+        let bytes = read_asset(asset)?;
+        match validate_input(&bytes, metadata.asset_id) {
+            Ok(context) => serde_json::to_string(&SourceValidation {
+                valid: true,
+                issues: Vec::new(),
+                source_module_id: context.module_id,
+                source_api_version: version()?,
+                logical_snapshot_key: context.logical_snapshot_key,
+                schema_fingerprint: context.schema_fingerprint,
+                mapping_version: context.mapping_version,
+            })
+            .map_err(|error| error.to_string()),
+            Err(error) => serde_json::to_string(&SourceValidation {
+                valid: false,
+                issues: vec![MappingIssue {
+                    code: error.code().to_owned(),
+                    message: error.detail(),
+                    source_record_key: None,
+                }],
+                source_module_id: "hevy".to_owned(),
+                source_api_version: version()?,
+                logical_snapshot_key: "hevy:invalid".to_owned(),
+                schema_fingerprint:
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                        .to_owned(),
+                mapping_version: version()?,
+            })
+            .map_err(|error| error.to_string()),
+        }
+    }
+
+    fn parse(asset: &AssetReader) -> Result<String, String> {
+        let metadata = asset.metadata();
+        let bytes = read_asset(asset)?;
+        let input = crate::CsvInput::new(bytes, metadata.asset_id);
+        let batch = match probe(&input.bytes)
+            .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+        {
+            crate::HevyArtifact::Measurements => {
+                let context = crate::context_for_measurements(&input)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
+                crate::parse_measurements(input, &context)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+            }
+            crate::HevyArtifact::Workouts => {
+                let context = crate::context_for_workouts(&input)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?;
+                crate::parse_workouts(input, &crate::ExerciseMapping::default(), &context)
+                    .map_err(|error| format!("{}: {}", error.code(), error.detail()))?
+            }
+        };
+        serde_json::to_string(&batch).map_err(|error| error.to_string())
+    }
+}
+
+fn version() -> Result<mfa_contracts::ContractVersion, String> {
+    "1.0.0"
+        .parse::<mfa_contracts::ContractVersion>()
+        .map_err(|error| error.to_string())
+}
+
+fn probe(bytes: &[u8]) -> Result<crate::HevyArtifact, crate::MappingError> {
+    let mut memory = MemoryAsset {
+        bytes: bytes.to_vec(),
+    };
+    match crate::detect_hevy(&mut memory) {
+        crate::ProbeResult::Match(artifact) => Ok(artifact),
+        crate::ProbeResult::InvalidUtf8 => Err(crate::MappingError::InvalidUtf8),
+        crate::ProbeResult::InvalidSchema => Err(crate::MappingError::InvalidCsv {
+            detail: "duplicate or malformed Hevy headers".to_owned(),
+        }),
+        crate::ProbeResult::NoMatch => Err(crate::MappingError::InvalidCsv {
+            detail: "unsupported Hevy artifact headers".to_owned(),
+        }),
+    }
+}
+
+fn validate_input(
+    bytes: &[u8],
+    asset_id: String,
+) -> Result<crate::MappingContext, crate::MappingError> {
+    let input = crate::CsvInput::new(bytes.to_vec(), asset_id);
+    match probe(bytes)? {
+        crate::HevyArtifact::Measurements => {
+            let context = crate::context_for_measurements(&input)?;
+            crate::parse_measurements(input, &context)?;
+            Ok(context)
+        }
+        crate::HevyArtifact::Workouts => {
+            let context = crate::context_for_workouts(&input)?;
+            crate::parse_workouts(input, &crate::ExerciseMapping::default(), &context)?;
+            Ok(context)
+        }
+    }
+}
+
+struct MemoryAsset {
+    bytes: Vec<u8>,
+}
+
+impl crate::GuestAssetReader for MemoryAsset {
+    fn read_all(&mut self) -> Result<Vec<u8>, String> {
+        Ok(self.bytes.clone())
+    }
+}
+
+fn read_asset(asset: &AssetReader) -> Result<Vec<u8>, String> {
+    let metadata = asset.metadata();
+    let byte_len = u32::try_from(metadata.byte_len)
+        .map_err(|_| "asset exceeds guest reader u32 limit".to_owned())?;
+    asset.read_at(0, byte_len)
+}

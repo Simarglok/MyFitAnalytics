@@ -36,7 +36,7 @@ describe('storage transport boundary', () => {
         modules: [],
       }),
       listModules: async () => [],
-      setWorkspaceRoot: async () => workspace,
+      chooseWorkspaceRoot: async () => workspace,
       refreshNow: async () => ({ scanId: 'scan-1', coalescedRequests: 0 }),
       getIngestionStatus: async () => status,
       listQualityItems: async () => quality,
@@ -52,7 +52,7 @@ describe('storage transport boundary', () => {
       },
     };
 
-    expect((await transport.setWorkspaceRoot('/tmp/workspace')).archiveRoot).toContain('archive');
+    expect((await transport.chooseWorkspaceRoot?.())?.archiveRoot).toContain('archive');
     expect((await transport.refreshNow()).scanId).toBe('scan-1');
     expect((await transport.getIngestionStatus()).health.state).toBe('healthy');
     expect(await transport.listQualityItems()).toEqual([]);

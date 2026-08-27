@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 build = "build.rs"
 
+[features]
+test-support = ["mfa-module-host/test-support"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 
@@ -16,12 +19,18 @@ mfa-contracts = { path = "../crates/mfa-contracts" }
 mfa-db = { path = "../crates/mfa-db" }
 mfa-ingestion = { path = "../crates/mfa-ingestion" }
 mfa-module-host = { path = "../crates/mfa-module-host" }
+rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+semver.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 tauri = { version = "2.11.0", features = [] }
 
 [dev-dependencies]
+mfa-module-host = { path = "../crates/mfa-module-host", features = ["test-support"] }
+myfitanalytics = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tokio.workspace = true
+sha2.workspace = true
+zip.workspace = true

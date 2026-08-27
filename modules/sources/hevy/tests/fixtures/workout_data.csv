@@ -1,0 +1,5 @@
+title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,rpe,duration_seconds,notes
+Synthetic Push,2026-02-03 17:00:00,2026-02-03 17:42:00,Bench Press,1,normal,60,8,8,,fictional set
+Synthetic Push,2026-02-03 17:00:00,2026-02-03 17:42:00,Bench Press,2,warmup,40,10,,,
+Synthetic Push,2026-02-03 17:00:00,2026-02-03 17:42:00,Plank,1,normal,,,,45,duration set
+Synthetic Push,2026-02-03 17:00:00,2026-02-03 17:42:00,Bench Press,3,failure,62.5,6,10,,repeated title is a new block

@@ -187,7 +187,7 @@ async fn production_rebuild_importer_replays_archive_through_runtime_and_actor()
     let view = service
         .database()
         .execute(QueryView::active_snapshot(
-            LogicalSnapshotKey::new("fixture-source:default").unwrap(),
+            LogicalSnapshotKey::new("fixture:2026").unwrap(),
         ))
         .await
         .unwrap();

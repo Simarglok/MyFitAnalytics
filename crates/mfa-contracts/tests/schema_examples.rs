@@ -28,6 +28,9 @@ fn source_manifest_example_requires_the_complete_contract() {
             "compatible_app_versions": [">=0.1.0"],
             "provided_capabilities": ["nutrition.items"],
             "accepted_file_patterns": ["*.xls"],
+            "artifact_signatures": ["sha256:abc"],
+            "extension_contracts": [],
+            "settings_schema": {},
             "entrypoint_hash": "sha256:abc",
             "localization_namespace": "source.mynetdiary"
         }),
