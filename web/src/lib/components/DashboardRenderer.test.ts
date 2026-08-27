@@ -78,6 +78,45 @@ describe("DashboardRenderer", () => {
     unmount(app);
   });
 
+  it("decodes actual Rust-shaped dashboard JSON without losing content", () => {
+    const { target, app } = render({
+      title_key: "base.body.title",
+      blocks: [
+        {
+          type: "card",
+          value: { key: "weight", label: "Weight", value: 82.5 },
+        },
+        {
+          type: "chart",
+          value: {
+            key: "trend",
+            chart_type: "line",
+            series: [{ name: "Weight", points: [["2026-01-01", 82.5]] }],
+          },
+        },
+      ],
+    });
+
+    expect(target.textContent).toContain("Weight");
+    expect(target.textContent).toContain("82.5");
+    expect(target.textContent).not.toContain("Dashboard content unavailable");
+    expect(target.querySelector('[data-chart-type="line"]')).not.toBeNull();
+    unmount(app);
+  });
+
+  it("decodes the Rust-shaped typed module error as a safe error panel", () => {
+    const { target, app } = render({
+      code: "module_invoke_error",
+      messageKey: "dashboard.module_error.module_invoke_error",
+    });
+
+    expect(target.querySelector('[data-module-error="module_invoke_error"]')).not.toBeNull();
+    expect(target.querySelector('[role="alert"]')).not.toBeNull();
+    expect(target.querySelectorAll("script")).toHaveLength(0);
+    expect(target.textContent).not.toContain("Dashboard content unavailable");
+    unmount(app);
+  });
+
   it.each([
     "missing_capability",
     "missing_dependency",

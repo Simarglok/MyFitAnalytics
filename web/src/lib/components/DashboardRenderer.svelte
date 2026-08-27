@@ -21,13 +21,36 @@
   type SafeDocument = DashboardDocument;
 
   function decodeDocument(value: unknown): SafeDocument | null {
-    if (!isRecord(value) || typeof value.titleKey !== 'string' || !Array.isArray(value.blocks)) {
+    if (!isRecord(value) || !Array.isArray(value.blocks)) {
       return null;
     }
+    const titleKey = typeof value.titleKey === 'string'
+      ? value.titleKey
+      : typeof value.title_key === 'string'
+        ? value.title_key
+        : null;
+    if (titleKey === null) return null;
     const blocks = value.blocks.map(decodeBlock);
     return blocks.every((block): block is DashboardBlock => block !== null)
-      ? { titleKey: value.titleKey, blocks }
+      ? { titleKey, blocks }
       : null;
+  }
+
+  function decodeOutput(value: unknown):
+    | { kind: 'document'; document: SafeDocument }
+    | { kind: 'module_error'; error: { code: string; messageKey: string } }
+    | null {
+    const document = decodeDocument(value);
+    if (document) return { kind: 'document', document };
+    if (!isRecord(value) || typeof value.code !== 'string') return null;
+    const messageKey = typeof value.messageKey === 'string'
+      ? value.messageKey
+      : typeof value.message_key === 'string'
+        ? value.message_key
+        : null;
+    return messageKey === null
+      ? null
+      : { kind: 'module_error', error: { code: value.code, messageKey } };
   }
 
   function decodeBlock(value: unknown): DashboardBlock | null {
@@ -65,7 +88,12 @@
   }
 
   function decodeStatus(value: Record<string, unknown>): DashboardBlock | null {
-    if (typeof value.key !== 'string' || typeof value.messageKey !== 'string' || !isRecord(value.state)) {
+    const messageKey = typeof value.messageKey === 'string'
+      ? value.messageKey
+      : typeof value.message_key === 'string'
+        ? value.message_key
+        : null;
+    if (typeof value.key !== 'string' || messageKey === null || !isRecord(value.state)) {
       return null;
     }
     const state = typeof value.state.state === 'string' ? value.state.state : value.state.type;
@@ -76,11 +104,11 @@
             key: value.key,
             state: {
               state: state as AvailabilityView['state'],
-              reasonKey: value.messageKey,
+              reasonKey: messageKey,
               requiredCapabilities: [],
               requiredDependencies: [],
             },
-            messageKey: value.messageKey,
+            messageKey,
           },
         }
       : null;
@@ -89,7 +117,7 @@
   function decodeChart(value: Record<string, unknown>): DashboardBlock | null {
     if (
       typeof value.key !== 'string' ||
-      !isChartType(value.chartType) ||
+      !isChartType(value.chartType ?? value.chart_type) ||
       !Array.isArray(value.series)
     ) {
       return null;
@@ -107,7 +135,10 @@
       }
       series.push({ name: candidate.name, points });
     }
-    return { type: 'chart', value: { key: value.key, chartType: value.chartType, series } };
+    return {
+      type: 'chart',
+      value: { key: value.key, chartType: (value.chartType ?? value.chart_type) as DashboardChart['chartType'], series },
+    };
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -128,7 +159,7 @@
     disabled_by_user: true,
   };
 
-  $: safeDocument = decodeDocument(document);
+  $: safeOutput = decodeOutput(document);
 
   function cardValue(value: unknown): string {
     if (value === null || value === undefined) return message('dashboard.card_empty');
@@ -145,20 +176,24 @@
   }
 </script>
 
-{#if !safeDocument}
+{#if !safeOutput}
   <section class="panel error" role="alert">
     <h2>{message('dashboard.content_unavailable')}</h2>
   </section>
+{:else if safeOutput.kind === 'module_error'}
+  <section class="panel error" role="alert" data-module-error={safeOutput.error.code}>
+    <h2>{message(safeOutput.error.messageKey, safeOutput.error.code)}</h2>
+  </section>
 {:else}
   <section class="dashboard-document" aria-labelledby="dashboard-document-title">
-    <h2 id="dashboard-document-title">{message(safeDocument.titleKey, safeDocument.titleKey)}</h2>
+    <h2 id="dashboard-document-title">{message(safeOutput.document.titleKey, safeOutput.document.titleKey)}</h2>
     {#if availability}
       <AvailabilityPanel {availability} />
     {/if}
-    {#if safeDocument.blocks.length === 0}
+    {#if safeOutput.document.blocks.length === 0}
       <p class="muted">{message('dashboard.no_points')}</p>
     {/if}
-    {#each safeDocument.blocks as block (block.value.key)}
+    {#each safeOutput.document.blocks as block (block.value.key)}
       {#if block.type === 'card'}
         <article class="dashboard-card" data-block-type="card">
           <span>{message(block.value.label, block.value.label)}</span>

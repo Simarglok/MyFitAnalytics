@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+const GOVERNED_EXTERNAL_EXERCISE_KEYS: &[&str] = &["bench press"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowCounts {
     pub seven_day: u32,
@@ -84,6 +86,7 @@ pub fn strength_analytics(
             continue;
         };
         if exercise_key.is_empty()
+            || !GOVERNED_EXTERNAL_EXERCISE_KEYS.contains(&exercise_key.as_str())
             || !weight_kg.is_finite()
             || weight_kg <= 0.0
             || !(1..=12).contains(&reps)

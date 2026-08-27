@@ -32,6 +32,13 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
             input,
             "body.weight",
         ),
+        chart(
+            "body.fat.trend",
+            "line",
+            "base.body.fat_trend",
+            input,
+            "body.fat_percentage",
+        ),
         status(
             "body.status",
             if available {

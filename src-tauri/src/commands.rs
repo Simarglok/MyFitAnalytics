@@ -6,8 +6,9 @@ use crate::view_models::{
 };
 use chrono::Utc;
 use mfa_analytics::{
-    DateRange, MetricContext, WeightObservation, activity_analytics, excluded_dates,
-    nutrition_analytics, rolling_tdee_with_context, strength_analytics, weight_analytics,
+    DateRange, MetricContext, WeightObservation, activity_analytics, body_fat_analytics,
+    excluded_dates, nutrition_analytics, rolling_tdee_with_context, strength_analytics,
+    weight_analytics,
 };
 use mfa_contracts::{
     AvailabilityState, CanonicalObservation, CapabilityId, DashboardInput, ModuleId,
@@ -829,6 +830,7 @@ async fn dashboard_input(
         }
     }
     let mut weight_observations = Vec::new();
+    let mut body_measurements = Vec::new();
     let mut nutrition_items = Vec::new();
     let mut activity_days = Vec::new();
     let mut activity_events = Vec::new();
@@ -838,6 +840,7 @@ async fn dashboard_input(
     let mut observed_dates = BTreeSet::new();
     let mut counts = BTreeMap::new();
     let body_weight = capability_id("body.weight");
+    let body_fat = capability_id("body.fat_percentage");
     let nutrition = capability_id("nutrition.items");
     let activity_days_cap = capability_id("activity.days");
     let activity_events_cap = capability_id("activity.events");
@@ -851,20 +854,29 @@ async fn dashboard_input(
                 continue;
             };
             match observation {
-                CanonicalObservation::BodyMeasurement(value)
+                CanonicalObservation::BodyMeasurement(value) => {
                     if active_provider_matches(
                         &providers.active_providers,
                         &body_weight,
                         source_module_id,
-                    ) =>
-                {
-                    observed_dates.insert(value.local_date);
-                    weight_observations.push(WeightObservation {
-                        observation_id: value.body_measurement_id.to_string(),
-                        local_date: value.local_date,
-                        weight_kg: value.weight_kg,
-                    });
-                    *counts.entry(body_weight.clone()).or_insert(0u64) += 1;
+                    ) {
+                        observed_dates.insert(value.local_date);
+                        weight_observations.push(WeightObservation {
+                            observation_id: value.body_measurement_id.to_string(),
+                            local_date: value.local_date,
+                            weight_kg: value.weight_kg,
+                        });
+                        *counts.entry(body_weight.clone()).or_insert(0u64) += 1;
+                    }
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &body_fat,
+                        source_module_id,
+                    ) {
+                        observed_dates.insert(value.local_date);
+                        body_measurements.push(value);
+                        *counts.entry(body_fat.clone()).or_insert(0u64) += 1;
+                    }
                 }
                 CanonicalObservation::NutritionItem(value)
                     if active_provider_matches(
@@ -981,6 +993,7 @@ async fn dashboard_input(
         mapping_versions,
     };
     let weight = weight_analytics(&context, &weight_observations);
+    let body_fat_result = body_fat_analytics(&context, &body_measurements);
     let nutrition_result = nutrition_analytics(
         &context,
         &nutrition_items,
@@ -1023,8 +1036,8 @@ async fn dashboard_input(
         "provenance": weight.provenance,
     });
     let body_fat_value = json!({
-        "observations": weight.observations,
-        "provenance": weight.provenance,
+        "observations": body_fat_result.observations,
+        "provenance": body_fat_result.provenance,
     });
     let nutrition_value = json!({
         "days": nutrition_result.days,
@@ -1040,12 +1053,10 @@ async fn dashboard_input(
         },
         "provenance": nutrition_result.provenance,
     });
-    let activity_value = json!({
+    let activity_days_value = json!({
         "steps": activity_result.steps.clone(),
         "mean_steps_7d": activity_result.mean_steps_7d.clone(),
         "mean_steps_28d": activity_result.mean_steps_28d.clone(),
-        "events": activity_result.events.clone(),
-        "heart_rate": activity_result.heart_rate.clone(),
         "water": activity_result.water.clone(),
         "provenance": activity_result.provenance.clone(),
     });
@@ -1083,7 +1094,7 @@ async fn dashboard_input(
             "body.weight" => weight_value.clone(),
             "body.fat_percentage" => body_fat_value.clone(),
             "nutrition.items" => nutrition_value.clone(),
-            "activity.days" => activity_value.clone(),
+            "activity.days" => activity_days_value.clone(),
             "activity.events" => activity_events_value.clone(),
             "heart_rate.observations" => heart_rate_value.clone(),
             "strength.sessions" => strength_value.clone(),
@@ -1265,6 +1276,7 @@ fn base_localization_keys() -> BTreeSet<String> {
         "body.phase_overlay",
         "body.slope",
         "body.trend",
+        "body.fat_trend",
         "body.missing",
         "body.ready",
         "nutrition.title",

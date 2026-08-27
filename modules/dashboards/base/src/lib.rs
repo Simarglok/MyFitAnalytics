@@ -68,7 +68,7 @@ pub fn compose_page(page: BasePage, input: &DashboardInput) -> DashboardDocument
 }
 
 pub fn describe_module() -> String {
-    r#"{"module_id":"base","module_version":"1.0.0","dashboard_api_version":"1.0.0","required_capabilities":["activity.days","body.fat_percentage","body.weight","heart_rate.observations","nutrition.items","strength.sessions","strength.sets"],"required_extension_contracts":[],"localization_namespace":"base"}"#.to_owned()
+    r#"{"module_id":"base","module_version":"1.0.0","dashboard_api_version":"1.0.0","required_capabilities":["activity.days","activity.events","body.fat_percentage","body.weight","heart_rate.observations","nutrition.items","strength.sessions","strength.sets"],"required_extension_contracts":[],"localization_namespace":"base"}"#.to_owned()
 }
 
 pub fn compose_json(input_json: &str) -> Result<String, String> {
@@ -122,6 +122,30 @@ pub(crate) fn value_or_missing(
         .find(|(id, _)| id.as_str() == capability)
     {
         Some((_, value)) => json!({"available": true, "value": value}),
+        None => json!({
+            "available": false,
+            "state": {"type": "missing_capability"},
+            "message_key": message_key,
+            "action": "import_data"
+        }),
+    }
+}
+
+pub(crate) fn value_or_missing_field(
+    input: &DashboardInput,
+    capability: &str,
+    field: &str,
+    message_key: &str,
+) -> Value {
+    match input
+        .capabilities
+        .iter()
+        .find(|(id, _)| id.as_str() == capability)
+    {
+        Some((_, value)) => json!({
+            "available": true,
+            "value": value.get(field).cloned().unwrap_or(Value::Null),
+        }),
         None => json!({
             "available": false,
             "state": {"type": "missing_capability"},

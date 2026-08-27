@@ -34,6 +34,7 @@ async fn bundled_base_component_invokes_through_the_production_runtime() {
         page_id: None,
         capabilities: [
             ("activity.days", json!({"steps": 9000})),
+            ("heart_rate.observations", json!({"observations": []})),
             ("body.fat_percentage", json!({"value": 18.0})),
             ("body.weight", json!([])),
             ("nutrition.items", json!({"calories": 2400})),

@@ -13,7 +13,7 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
         card(
             "activity.events",
             "base.activity.events",
-            value_or_missing(input, "activity.days", "base.activity.missing"),
+            value_or_missing(input, "activity.events", "base.activity.missing"),
         ),
         card(
             "activity.heart_rate",

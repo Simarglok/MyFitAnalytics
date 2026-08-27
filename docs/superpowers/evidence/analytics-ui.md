@@ -50,9 +50,10 @@ all three inbox files had been deleted after successful commit, and ingestion
 health was normal. These facts prevented the gate from masking a parser or
 archive failure as a dashboard failure.
 
-## Task 7 GREEN evidence
+## Prior Task 7 GREEN evidence
 
-The focused gate passed after each RED boundary was fixed:
+The focused gate passed after each prior Task 7 RED boundary was fixed. This
+section is historical; correction-round-2 results are recorded below.
 
 ```text
 cargo test -p mfa-integration-tests --test dashboard_gate -- --test-threads=1
@@ -101,9 +102,9 @@ The focused Cargo command is:
 cargo test -p mfa-integration-tests --test dashboard_gate -- --test-threads=1
 ```
 
-Fresh runner result: `bash scripts/run-dashboard-gate.sh` exited `0`; package
+Prior runner result: `bash scripts/run-dashboard-gate.sh` exited `0`; package
 builds completed and `production_dashboard_gate_imports_fixtures_and_queries_every_base_page`
-reported 1 passed, 0 failed.
+reported 1 passed, 0 failed. This is not the correction-round-2 result.
 
 The relevant frontend commands are:
 
@@ -140,6 +141,34 @@ cargo test --workspace -- --test-threads=1
 
 It exited `0`: all workspace unit, integration, and doctests passed, including
 the corrected migration and ingestion suites and the production dashboard gate.
+
+## Correction round 2 evidence
+
+Terra re-review identified six scoped findings. The following RED/GREEN records
+were run against checked-in synthetic fixtures and packaged components only:
+
+| Finding | RED evidence | Scoped correction / GREEN evidence |
+| --- | --- | --- |
+| Packaged activity invoke failure | `bash scripts/run-dashboard-gate.sh` reached the activity page and returned the typed `dashboard.module_error.module_invoke_error`; the direct packaged test also exposed the missing `heart_rate.observations` input. | Activity cards now consume separate declared datasets, the direct fixture supplies heart rate, and the gate progressed through all page/analytics assertions without the Wasmtime invoke error. |
+| Rust/Tauri dashboard JSON mismatch | Frontend transport tests lacked Rust snake_case document and typed module-error coverage. | Vitest: `pnpm --dir web test -- --run` exited `0` (8 files, 27 tests), including actual Rust-shaped Document and ModuleError cases; malformed content still renders the safe unavailable panel. |
+| `activity.days` capability contract | The production gate reported an incompatible activity provider contract after the activity capability split. | Source manifest, component metadata, bundled defaults, dashboard requirements, and emitted datasets now agree; the gate reached all six page documents. |
+| Optional body-fat analytics | Base dashboard RED: `body_page_renders_optional_body_fat_series_without_weight_substitution` failed because no body-fat chart existed. | Analytics body-fat suite exited `0` (2 tests); dashboard-base body-fat regression exited `0`; command assembly uses `body_fat_pct` and preserves nulls rather than weight values. |
+| Governed exercise keys | Strength RED: an unmapped `external` exercise entered working sets. | Strength focused regression exited `0`; only the checked-in governed external mapping is accepted and source exercise names remain unchanged. |
+| DashboardBlock wrapper unknown fields | Validator RED: a wrapper-level `onClick` field was accepted. | Dashboard-host focused validator regression exited `0`; wrapper fields are rejected before document deserialization. |
+
+The final correction-round-2 gate was run with `bash scripts/run-dashboard-gate.sh`
+after the scoped fixture/contract updates. Package builds and all page queries
+completed, but the gate remains RED at
+`crates/mfa-integration-tests/tests/dashboard_gate.rs` TDEE coverage: field
+`complete_nutrition_days` was `0` while the checked-in expectation is `1`.
+This fixture/semantic discrepancy is intentionally recorded for manager
+verification and is not represented as a green result here.
+
+Focused Rust suites already run in this correction round include
+`cargo test -p mfa-analytics` (exit `0`), the dashboard-base focused suite
+(body-fat regression exit `0`), the dashboard-host wrapper regression (exit
+`0`), and the packaged gate invocations described above. No native foreground
+acceptance, production app launch, Plan 5 work, or remote mutation was done.
 
 ## Safety and truthfulness boundary
 

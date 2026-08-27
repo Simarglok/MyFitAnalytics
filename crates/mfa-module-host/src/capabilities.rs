@@ -164,7 +164,9 @@ impl CapabilityRegistry {
 pub fn bundled_defaults() -> BTreeMap<CapabilityId, ModuleId> {
     [
         ("nutrition.items", "mynetdiary"),
+        ("activity.days", "mynetdiary"),
         ("activity.events", "mynetdiary"),
+        ("heart_rate.observations", "mynetdiary"),
         ("body.weight", "hevy"),
         ("body.fat_percentage", "hevy"),
         ("strength.sessions", "hevy"),

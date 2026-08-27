@@ -141,6 +141,15 @@ fn strength_analytics_counts_calendar_windows_and_filters_epley_inputs() {
                 Some(300.0),
                 Some(5),
             ),
+            set(
+                110,
+                4,
+                "unmapped external",
+                "normal",
+                "external",
+                Some(200.0),
+                Some(5),
+            ),
         ],
     );
 
@@ -171,6 +180,12 @@ fn strength_analytics_counts_calendar_windows_and_filters_epley_inputs() {
             .working_sets
             .iter()
             .all(|value| value.exercise_key != "mystery")
+    );
+    assert!(
+        result
+            .working_sets
+            .iter()
+            .all(|value| value.exercise_key != "unmapped external")
     );
 
     assert_eq!(result.weekly_best_e1rm.len(), 4);

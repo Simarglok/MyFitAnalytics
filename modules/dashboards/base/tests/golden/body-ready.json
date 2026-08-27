@@ -104,6 +104,19 @@
       }
     },
     {
+      "type": "chart",
+      "value": {
+        "key": "body.fat.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.body.fat_trend",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
       "type": "status_panel",
       "value": {
         "key": "body.status",

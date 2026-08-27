@@ -123,6 +123,7 @@ export const CORE_ENGLISH_CATALOG = {
   "base.body.trailing_mean": "7-day mean",
   "base.body.slope": "28-day trend",
   "base.body.trend": "Weight trend",
+  "base.body.fat_trend": "Body-fat trend",
   "base.body.missing": "Weight data is unavailable",
   "base.body.ready": "Weight data is ready",
   "base.nutrition.title": "Nutrition",

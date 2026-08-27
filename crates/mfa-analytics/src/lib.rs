@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod body_fat;
 pub mod coverage;
 pub mod nutrition;
 pub mod phase;
@@ -12,6 +13,7 @@ pub use coverage::TdeeCoverage;
 pub use phase::excluded_dates;
 
 pub use activity::{ActivityAnalytics, ActivitySummary, activity_analytics};
+pub use body_fat::{BodyFatAnalytics, body_fat_analytics};
 pub use nutrition::{NutritionAnalytics, NutritionDay, NutritionQuality, nutrition_analytics};
 pub use provenance::{
     AlgorithmVersion, CoverageEvidence, DerivedProvenance, MetricContext, SnapshotRef,

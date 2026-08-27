@@ -143,6 +143,11 @@ fn reject_unknown_node_types(raw: &Value) -> Result<(), DocumentValidationError>
         return Ok(());
     };
     for block in blocks {
+        if let Some(object) = block.as_object()
+            && object.keys().any(|key| key != "type" && key != "value")
+        {
+            return Err(DocumentValidationError::MalformedDocument);
+        }
         let Some(node_type) = block.get("type").and_then(Value::as_str) else {
             continue;
         };

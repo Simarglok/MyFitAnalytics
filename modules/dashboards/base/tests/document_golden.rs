@@ -186,3 +186,69 @@ fn chart_extracts_object_dataset_points_and_preserves_gaps() {
         ])
     );
 }
+
+#[test]
+fn activity_cards_use_their_declared_capabilities_independently() {
+    let input = DashboardInput {
+        page_id: Some("activity".to_owned()),
+        capabilities: BTreeMap::from([
+            (
+                capability("activity.days"),
+                json!({"steps": [{"local_date": "2026-01-01", "value": 9000}]}),
+            ),
+            (
+                capability("activity.events"),
+                json!({"events": [{"local_date": "2026-01-01", "accepted_event_count": 2}]}),
+            ),
+            (
+                capability("heart_rate.observations"),
+                json!({"observations": []}),
+            ),
+        ]),
+        extensions: BTreeMap::new(),
+    };
+
+    let document = compose_page(BasePage::Activity, &input);
+    let events = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            DashboardBlock::Card(card) if card.key == "activity.events" => Some(&card.value),
+            _ => None,
+        })
+        .expect("activity events card");
+    assert_eq!(events["value"]["events"][0]["accepted_event_count"], 2);
+}
+
+#[test]
+fn body_page_renders_optional_body_fat_series_without_weight_substitution() {
+    let input = DashboardInput {
+        page_id: Some("body".to_owned()),
+        capabilities: BTreeMap::from([
+            (
+                capability("body.weight"),
+                json!({"observations": [{"local_date": "2026-01-01", "value_kg": 82.0}]}),
+            ),
+            (
+                capability("body.fat_percentage"),
+                json!({"observations": [
+                    {"local_date": "2026-01-01", "value": 18.5},
+                    {"local_date": "2026-01-02", "value": null}
+                ]}),
+            ),
+        ]),
+        extensions: BTreeMap::new(),
+    };
+
+    let document = compose_page(BasePage::Body, &input);
+    let chart = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            DashboardBlock::Chart(chart) if chart.key == "body.fat.trend" => Some(chart),
+            _ => None,
+        })
+        .expect("body fat chart");
+    assert_eq!(chart.series[0].points[0].1, Some(18.5));
+    assert_eq!(chart.series[0].points[1].1, None);
+}

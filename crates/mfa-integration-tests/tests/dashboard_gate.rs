@@ -624,6 +624,18 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         dashboard_document(&activity_page.document),
         "activity.steps",
     );
+    let activity_events_value = card_value(
+        dashboard_document(&activity_page.document),
+        "activity.events",
+    );
+    let heart_rate_value = card_value(
+        dashboard_document(&activity_page.document),
+        "activity.heart_rate",
+    );
+    let activity_water_value = card_value(
+        dashboard_document(&activity_page.document),
+        "activity.water",
+    );
     let activity_date = expected_analytics["activity"]["observedDate"]
         .as_str()
         .unwrap();
@@ -634,8 +646,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         &expected_analytics["activity"]["steps"],
         "activity.steps",
     );
-    let activity_summary =
-        point_for_date(activity_value["events"].as_array().unwrap(), activity_date);
+    let activity_summary = point_for_date(
+        activity_events_value["events"].as_array().unwrap(),
+        activity_date,
+    );
     assert_eq!(
         activity_summary["accepted_event_count"].as_u64().unwrap(),
         expected_analytics["activity"]["acceptedEventCount"]
@@ -688,7 +702,7 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     );
     assert_golden_number(
         point_for_date(
-            activity_value["heart_rate"].as_array().unwrap(),
+            heart_rate_value["observations"].as_array().unwrap(),
             activity_date,
         )["value"]
             .as_f64()
@@ -697,7 +711,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         "activity.heartRate",
     );
     assert_golden_number(
-        point_for_date(activity_value["water"].as_array().unwrap(), activity_date)["value"]
+        point_for_date(
+            activity_water_value["water"].as_array().unwrap(),
+            activity_date,
+        )["value"]
             .as_f64()
             .unwrap(),
         &expected_analytics["activity"]["waterMl"],

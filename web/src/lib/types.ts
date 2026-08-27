@@ -56,6 +56,13 @@ export interface DashboardDocument {
   blocks: DashboardBlock[];
 }
 
+export interface ModuleErrorView {
+  code: string;
+  messageKey: string;
+}
+
+export type DashboardOutput = DashboardDocument | ModuleErrorView;
+
 export interface CoverageView {
   expectedDays: number;
   observedDays: number;
@@ -84,7 +91,7 @@ export interface DashboardPageView {
   moduleId: string;
   pageId: string;
   titleKey: string;
-  document: DashboardDocument;
+  document: DashboardOutput;
   availability: AvailabilityView;
   coverage: CoverageView;
   freshness: FreshnessView;

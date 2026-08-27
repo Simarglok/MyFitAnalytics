@@ -170,6 +170,7 @@ fn validator_rejects_nonfinite_oversized_undeclared_and_unsafe_chart_values() {
 fn validator_rejects_unknown_fields_at_every_document_shape() {
     let cases = [
         r#"{"title_key":"dashboard.title","blocks":[],"onClick":"bad"}"#,
+        r#"{"title_key":"dashboard.title","blocks":[{"type":"card","value":{"key":"x","label":"dashboard.weight","value":82.5},"onClick":"bad"}]}"#,
         r#"{"title_key":"dashboard.title","blocks":[{"type":"card","value":{"key":"x","label":"dashboard.weight","value":82.5,"onClick":"bad"}}]}"#,
         r#"{"title_key":"dashboard.title","blocks":[{"type":"table","value":{"key":"x","columns":[],"rows":[],"onClick":"bad"}}]}"#,
         r#"{"title_key":"dashboard.title","blocks":[{"type":"status_panel","value":{"key":"x","state":{"type":"ready"},"message_key":"dashboard.status","onClick":"bad"}}]}"#,
