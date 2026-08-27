@@ -4,9 +4,9 @@ MyFitAnalytics is a local-first, private workspace for personal fitness analytic
 
 ## Status
 
-The foundation is implemented and buildable. It includes the Rust workspace, shared versioned contracts, module package validation and installation, a sandboxed Wasm component host, capability/provider resolution, locale fallback, and a typed Tauri-to-Svelte shell.
+The foundation is implemented and buildable. It includes the Rust workspace, shared versioned contracts, module package validation and installation, Storage/Ingestion, bundled Hevy and MyNetDiary source modules, a sandboxed Wasm component host, capability/provider resolution, locale fallback, and a typed Tauri-to-Svelte shell.
 
-The following are planned and are not complete yet: Storage/Ingestion, bundled source modules, the analytics and dashboard UI, tray/background behavior, and release distribution. Local macOS `.app` packaging is available for development validation; release signing, notarization, and publishing are not part of the current implementation.
+Storage/Ingestion and the bundled Hevy/MyNetDiary source modules are implemented. The analytics and dashboard UI, tray/background product behavior, and release distribution remain incomplete and are future work. Local macOS `.app` and DMG bundles are development-validation artifacts with ad hoc signing; strict signature and entitlement verification is performed, but no notarization or publishing is claimed.
 
 ## Architecture
 
