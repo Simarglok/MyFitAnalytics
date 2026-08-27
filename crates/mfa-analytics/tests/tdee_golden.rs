@@ -1,5 +1,6 @@
 use mfa_analytics::{
-    DateRange, NutritionDay, NutritionQuality, TdeeResult, WeightPoint, rolling_tdee,
+    AlgorithmVersion, DateRange, MetricContext, NutritionDay, NutritionQuality, SnapshotRef,
+    TdeeResult, WeightPoint, rolling_tdee, rolling_tdee_with_context,
 };
 use mfa_contracts::{LocalDate, PhaseEvent};
 use std::str::FromStr;
@@ -11,6 +12,18 @@ fn date(value: &str) -> LocalDate {
 
 fn window() -> DateRange {
     DateRange::inclusive(date("2026-01-01"), date("2026-01-28"))
+}
+
+#[test]
+fn trailing_tdee_window_contains_exactly_28_local_dates() {
+    let display_range = DateRange::inclusive(date("2026-01-01"), date("2026-01-31"));
+    let tdee_range = display_range
+        .trailing_ending(display_range.end, 28)
+        .expect("positive trailing window");
+
+    assert_eq!(tdee_range.start, date("2026-01-04"));
+    assert_eq!(tdee_range.end, date("2026-01-31"));
+    assert_eq!(tdee_range.len_days(), 28);
 }
 
 fn nutrition_days(complete_days: usize) -> Vec<NutritionDay> {
@@ -147,8 +160,36 @@ fn coverage_reports_unavailable_slope_without_returning_numeric_tdee() {
         &[],
     );
     assert_insufficient(result, |coverage| {
-        assert_eq!(coverage.weight_days, 8);
+        assert_eq!(coverage.weight_days, 0);
         assert!(!coverage.slope_available);
+    });
+}
+
+#[test]
+fn non_finite_weights_do_not_satisfy_weight_coverage_boundaries() {
+    let result = rolling_tdee(
+        window(),
+        &nutrition_days(21),
+        &weights(
+            &[0, 3, 6, 9, 12, 15, 20, 24, 27],
+            &[
+                80.0,
+                80.0,
+                80.0,
+                80.0,
+                80.0,
+                80.0,
+                80.0,
+                f64::NAN,
+                f64::INFINITY,
+            ],
+        ),
+        &[],
+    );
+    assert_insufficient(result, |coverage| {
+        assert_eq!(coverage.weight_days, 7);
+        assert_eq!(coverage.first_7d_weight_days, 3);
+        assert_eq!(coverage.last_7d_weight_days, 0);
     });
 }
 
@@ -188,4 +229,36 @@ fn ready_tdee_estimate_carries_derived_provenance() {
     };
     assert_eq!(estimate.provenance.requested, window());
     assert_eq!(estimate.provenance.snapshot_refs.len(), 0);
+}
+
+#[test]
+fn contextual_tdee_preserves_snapshot_and_mapping_provenance() {
+    let context = MetricContext {
+        requested: window(),
+        as_of: date("2026-01-28"),
+        snapshot_refs: vec![SnapshotRef {
+            logical_snapshot_key: "mynetdiary:active".to_owned(),
+            snapshot_id: "snapshot-1".to_owned(),
+        }],
+        algorithm_version: AlgorithmVersion::new("base-analytics-v1"),
+        mapping_versions: vec!["mynetdiary@1.0.0".to_owned()],
+    };
+    let result = rolling_tdee_with_context(
+        &context,
+        &nutrition_days(21),
+        &weights(&[0, 3, 6, 9, 12, 15, 20, 24, 27], &[80.0; 9]),
+        &[],
+    );
+
+    let TdeeResult::Ready(estimate) = result else {
+        panic!("expected ready TDEE");
+    };
+    assert_eq!(
+        estimate.provenance.snapshot_refs[0].snapshot_id,
+        "snapshot-1"
+    );
+    assert_eq!(
+        estimate.provenance.mapping_versions,
+        vec!["mynetdiary@1.0.0"]
+    );
 }

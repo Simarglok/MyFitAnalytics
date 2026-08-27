@@ -19,7 +19,7 @@ pub use provenance::{
 pub use strength::{
     E1rmPoint, SessionDuration, StrengthAnalytics, WindowCounts, WorkingSet, strength_analytics,
 };
-pub use tdee::{TdeeEstimate, TdeeResult, rolling_tdee};
+pub use tdee::{TdeeEstimate, TdeeResult, rolling_tdee, rolling_tdee_with_context};
 pub use weight::{
     NullablePoint, TheilSenEstimate, WeightAnalytics, WeightObservation, WeightPoint,
     weight_analytics,

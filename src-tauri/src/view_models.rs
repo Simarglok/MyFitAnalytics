@@ -1,4 +1,5 @@
-use mfa_contracts::{AvailabilityState, DashboardBlock, DashboardDocument, LocalDate};
+use mfa_contracts::{AvailabilityState, DashboardBlock, LocalDate};
+use mfa_dashboard_host::DashboardOutput;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +40,8 @@ pub struct AvailabilityView {
     pub reason_key: String,
     pub required_capabilities: Vec<String>,
     pub required_dependencies: Vec<String>,
+    pub freshness: mfa_dashboard_host::Freshness,
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,7 +82,7 @@ pub struct DashboardPageView {
     pub module_id: String,
     pub page_id: String,
     pub title_key: String,
-    pub document: DashboardDocument,
+    pub document: DashboardOutput,
     pub availability: AvailabilityView,
     pub coverage: CoverageView,
     pub freshness: FreshnessView,

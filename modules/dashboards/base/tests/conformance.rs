@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 fn grant() -> DashboardInput {
     DashboardInput {
+        page_id: None,
         capabilities: BTreeMap::from([
             (CapabilityId::try_from("body.weight").unwrap(), json!([])),
             (

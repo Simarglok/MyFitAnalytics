@@ -88,8 +88,10 @@ pub fn validate_document(
                     point_count = point_count.saturating_add(series.points.len());
                     for (label, value) in &series.points {
                         safe_string(label)?;
-                        if !value.is_finite() {
-                            return Err(DocumentValidationError::NonFiniteNumber);
+                        if let Some(value) = value {
+                            if !value.is_finite() {
+                                return Err(DocumentValidationError::NonFiniteNumber);
+                            }
                         }
                     }
                 }
@@ -119,9 +121,20 @@ pub fn validate_or_error(
     grant: &DashboardInput,
     localization_keys: &BTreeSet<String>,
 ) -> DashboardOutput {
-    match validate_document(&document, grant, localization_keys) {
-        Ok(()) => DashboardOutput::Document(document),
-        Err(error) => DashboardOutput::ModuleError(ModuleErrorView::from_code(error.code())),
+    validate_or_error_result::<String>(Ok(document), grant, localization_keys)
+}
+
+pub fn validate_or_error_result<E: Into<String>>(
+    result: Result<DashboardDocument, E>,
+    grant: &DashboardInput,
+    localization_keys: &BTreeSet<String>,
+) -> DashboardOutput {
+    match result {
+        Ok(document) => match validate_document(&document, grant, localization_keys) {
+            Ok(()) => DashboardOutput::Document(document),
+            Err(error) => DashboardOutput::ModuleError(ModuleErrorView::from_code(error.code())),
+        },
+        Err(error) => DashboardOutput::ModuleError(ModuleErrorView::from_code(error)),
     }
 }
 

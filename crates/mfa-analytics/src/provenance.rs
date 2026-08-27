@@ -42,13 +42,14 @@ pub struct MetricContext {
     pub as_of: LocalDate,
     pub snapshot_refs: Vec<SnapshotRef>,
     pub algorithm_version: AlgorithmVersion,
+    pub mapping_versions: Vec<String>,
 }
 
 impl MetricContext {
-    pub(crate) fn provenance(&self, observed_days: usize) -> DerivedProvenance {
+    pub fn provenance(&self, observed_days: usize) -> DerivedProvenance {
         DerivedProvenance {
             algorithm_version: self.algorithm_version.clone(),
-            mapping_versions: Vec::new(),
+            mapping_versions: self.mapping_versions.clone(),
             requested: self.requested,
             coverage: CoverageEvidence {
                 requested_days: self.requested.len_days(),

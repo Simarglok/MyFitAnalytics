@@ -76,23 +76,21 @@ pub fn strength_analytics(
             continue;
         };
         let set_type = set.set_type.trim().to_ascii_lowercase();
-        if !matches!(set_type.as_str(), "normal" | "failure") {
+        if !matches!(set_type.as_str(), "normal" | "failure") || set.load_type != "external" {
             continue;
         }
         let exercise_key = set.exercise_key.trim().to_ascii_lowercase();
-        if exercise_key.is_empty() || set.load_type == "unknown" {
-            continue;
-        }
-        *working_sets.entry(exercise_key.clone()).or_default() += 1;
-        if set.load_type != "external" {
-            continue;
-        }
         let (Some(weight_kg), Some(reps)) = (set.weight_kg, set.reps) else {
             continue;
         };
-        if !weight_kg.is_finite() || weight_kg <= 0.0 || !(1..=12).contains(&reps) {
+        if exercise_key.is_empty()
+            || !weight_kg.is_finite()
+            || weight_kg <= 0.0
+            || !(1..=12).contains(&reps)
+        {
             continue;
         }
+        *working_sets.entry(exercise_key.clone()).or_default() += 1;
         let week_start = week_start(local_date);
         let e1rm = weight_kg * (1.0 + reps as f64 / 30.0);
         e1rm_by_week

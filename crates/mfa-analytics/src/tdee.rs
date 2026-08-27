@@ -1,6 +1,6 @@
 use crate::coverage::{TdeeCoverage, build_coverage};
 use crate::phase::excluded_dates;
-use crate::provenance::{AlgorithmVersion, CoverageEvidence, DerivedProvenance};
+use crate::provenance::{AlgorithmVersion, DerivedProvenance, MetricContext};
 use crate::weight::{TheilSenEstimate, WeightPoint};
 use crate::window::DateRange;
 use mfa_contracts::{LocalDate, PhaseEvent};
@@ -33,6 +33,23 @@ pub fn rolling_tdee(
     weights: &[WeightPoint],
     phases: &[PhaseEvent],
 ) -> TdeeResult {
+    let context = MetricContext {
+        requested: window,
+        as_of: window.end,
+        snapshot_refs: Vec::new(),
+        algorithm_version: AlgorithmVersion::new("tdee.rolling@1"),
+        mapping_versions: Vec::new(),
+    };
+    rolling_tdee_with_context(&context, nutrition, weights, phases)
+}
+
+pub fn rolling_tdee_with_context(
+    context: &MetricContext,
+    nutrition: &[NutritionDay],
+    weights: &[WeightPoint],
+    phases: &[PhaseEvent],
+) -> TdeeResult {
+    let window = context.requested;
     let excluded = excluded_dates(window, phases);
     let complete_intake = nutrition
         .iter()
@@ -48,7 +65,7 @@ pub fn rolling_tdee(
         });
     let weight_dates = weights
         .iter()
-        .filter(|point| window.contains(point.local_date))
+        .filter(|point| window.contains(point.local_date) && point.value_kg.is_finite())
         .map(|point| point.local_date)
         .collect::<BTreeSet<_>>();
     let weight_values = weights
@@ -94,16 +111,8 @@ pub fn rolling_tdee(
         .sum::<f64>()
         / coverage.complete_nutrition_days as f64;
     let slope = slope.expect("coverage requires an available slope");
-    let provenance = DerivedProvenance {
-        algorithm_version: AlgorithmVersion::new("tdee.rolling@1"),
-        mapping_versions: Vec::new(),
-        requested: window,
-        coverage: CoverageEvidence {
-            requested_days: window.len_days(),
-            observed_days: coverage.complete_nutrition_days as u64,
-        },
-        snapshot_refs: Vec::new(),
-    };
+    let mut provenance = context.provenance(coverage.complete_nutrition_days as usize);
+    provenance.algorithm_version = AlgorithmVersion::new("tdee.rolling@1");
     TdeeResult::Ready(TdeeEstimate {
         kcal_per_day: average_intake - 7_700.0 * slope.slope_per_day,
         low: average_intake - 7_700.0 * slope.upper_bound,

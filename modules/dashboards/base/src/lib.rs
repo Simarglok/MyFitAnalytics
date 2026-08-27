@@ -68,7 +68,7 @@ pub fn compose_page(page: BasePage, input: &DashboardInput) -> DashboardDocument
 }
 
 pub fn describe_module() -> String {
-    r#"{"module_id":"base","module_version":"1.0.0","dashboard_api_version":"1.0.0","required_capabilities":["activity.days","body.fat_percentage","body.weight","nutrition.items","strength.sessions","strength.sets"],"required_extension_contracts":[],"localization_namespace":"base"}"#.to_owned()
+    r#"{"module_id":"base","module_version":"1.0.0","dashboard_api_version":"1.0.0","required_capabilities":["activity.days","body.fat_percentage","body.weight","heart_rate.observations","nutrition.items","strength.sessions","strength.sets"],"required_extension_contracts":[],"localization_namespace":"base"}"#.to_owned()
 }
 
 pub fn compose_json(input_json: &str) -> Result<String, String> {
@@ -164,7 +164,7 @@ pub(crate) fn chart(
     })
 }
 
-fn points(input: &DashboardInput, capability: &str) -> Vec<(String, f64)> {
+fn points(input: &DashboardInput, capability: &str) -> Vec<(String, Option<f64>)> {
     let Some(value) = input
         .capabilities
         .iter()
@@ -173,16 +173,45 @@ fn points(input: &DashboardInput, capability: &str) -> Vec<(String, f64)> {
     else {
         return Vec::new();
     };
-    let Some(values) = value.as_array() else {
-        return Vec::new();
-    };
+    let values = value.as_array().or_else(|| {
+        [
+            "trailing7dMeanKg",
+            "dailyMedianKg",
+            "observations",
+            "days",
+            "steps",
+            "mean_steps_7d",
+            "session_durations",
+        ]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_array))
+    });
+    values
+        .map(|values| parse_points(values))
+        .unwrap_or_default()
+}
+
+fn parse_points(values: &[Value]) -> Vec<(String, Option<f64>)> {
     values
         .iter()
         .filter_map(|value| {
             let object = value.as_object()?;
-            let label = object.get("date")?.as_str()?.to_owned();
-            let number = object.get("value")?.as_f64()?;
-            number.is_finite().then_some((label, number))
+            let label = ["date", "local_date", "week_start", "label"]
+                .into_iter()
+                .find_map(|key| object.get(key).and_then(Value::as_str))?
+                .to_owned();
+            let number = [
+                "value",
+                "value_kg",
+                "calories_kcal",
+                "steps",
+                "duration_seconds",
+                "water_ml",
+            ]
+            .into_iter()
+            .find_map(|key| object.get(key))
+            .map(|value| value.as_f64().filter(|number| number.is_finite()));
+            Some((label, number.flatten()))
         })
         .collect()
 }

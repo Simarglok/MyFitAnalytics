@@ -22,6 +22,7 @@ fn context() -> MetricContext {
             snapshot_id: "snapshot-strength".to_owned(),
         }],
         algorithm_version: AlgorithmVersion::new("strength.epley@1"),
+        mapping_versions: Vec::new(),
     }
 }
 
@@ -154,7 +155,7 @@ fn strength_analytics_counts_calendar_windows_and_filters_epley_inputs() {
             .iter()
             .find(|value| value.exercise_key == "bench press")
             .map(|value| value.count),
-        Some(6)
+        Some(4)
     );
     assert_eq!(
         result
@@ -162,8 +163,9 @@ fn strength_analytics_counts_calendar_windows_and_filters_epley_inputs() {
             .iter()
             .find(|value| value.exercise_key == "push-up")
             .map(|value| value.count),
-        Some(1)
+        None
     );
+
     assert!(
         result
             .working_sets

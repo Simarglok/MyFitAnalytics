@@ -22,6 +22,7 @@ fn context() -> MetricContext {
             snapshot_id: "snapshot-activity".to_owned(),
         }],
         algorithm_version: AlgorithmVersion::new("activity.aggregate@1"),
+        mapping_versions: Vec::new(),
     }
 }
 

@@ -31,6 +31,7 @@ async fn bundled_base_component_invokes_through_the_production_runtime() {
     let installer = PackageInstaller::new(store.path());
     let module = installer.install(&bundled_package_path()).unwrap();
     let input = DashboardInput {
+        page_id: None,
         capabilities: [
             ("activity.days", json!({"steps": 9000})),
             ("body.fat_percentage", json!({"value": 18.0})),

@@ -7,15 +7,19 @@ use crate::view_models::{
 use chrono::Utc;
 use mfa_analytics::{
     DateRange, MetricContext, WeightObservation, activity_analytics, excluded_dates,
-    nutrition_analytics, rolling_tdee, strength_analytics, weight_analytics,
+    nutrition_analytics, rolling_tdee_with_context, strength_analytics, weight_analytics,
 };
 use mfa_contracts::{
     AvailabilityState, CanonicalObservation, CapabilityId, DashboardInput, ModuleId,
     ModuleManifest, ModuleType, PhaseEvent,
 };
+use mfa_dashboard_host::{
+    AvailabilityResolver, CoverageCatalog, Freshness, ModuleRegistryView, ResolvedCapabilities,
+    ResolvedCapability,
+};
 use mfa_db::{
     CreatePhaseEvent, DeletePhaseEvent, HealthCheck, ListActiveSnapshotKeys, ListPhaseEvents,
-    ListQualityItems, QuerySnapshot, UpdatePhaseEvent,
+    ListQualityItems, QuerySnapshot, SnapshotResponse, UpdatePhaseEvent,
 };
 use mfa_ingestion::{HealthSnapshot, HealthState, IngestionCoordinator, RecoveryMode, now_request};
 use mfa_module_host::{ComponentRuntime, InstalledModule, PackageInstaller, UninstallTransaction};
@@ -521,6 +525,30 @@ const BASE_DASHBOARD_PAGES: [(&str, &str); 6] = [
 ];
 
 pub async fn get_navigation_inner(state: &AppState) -> Result<NavigationView, CommandError> {
+    let requested = DateRangeView::synthetic_default()
+        .parse()
+        .map(|(start, end)| DateRange { start, end })
+        .map_err(|detail| command_error("invalid_date_range", &detail))?;
+    let availability = match state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id.as_str() == "base")
+    {
+        Some(module) => match &module.manifest {
+            ModuleManifest::Dashboard(manifest) => {
+                dashboard_input(
+                    state,
+                    &requested,
+                    "overview",
+                    &manifest.required_capabilities,
+                )
+                .await?
+                .availability
+            }
+            _ => missing_dashboard_availability("base"),
+        },
+        None => missing_dashboard_availability("base"),
+    };
     let items = BASE_DASHBOARD_PAGES
         .into_iter()
         .map(|(page_id, title_key)| NavigationItemView {
@@ -528,7 +556,7 @@ pub async fn get_navigation_inner(state: &AppState) -> Result<NavigationView, Co
             page_id: page_id.to_owned(),
             title_key: title_key.to_owned(),
             module_id: "base".to_owned(),
-            availability: dashboard_availability(state, "base", 0, 1),
+            availability: availability.clone(),
         })
         .collect();
     Ok(NavigationView { items })
@@ -563,12 +591,7 @@ pub async fn get_dashboard_inner(
                 "the dashboard module is not installed",
             )
         })?;
-    if !module.enabled {
-        return Err(command_error(
-            "dashboard_disabled",
-            "the dashboard module is disabled",
-        ));
-    }
+
     let manifest = match &module.manifest {
         ModuleManifest::Dashboard(manifest) => manifest,
         _ => {
@@ -579,48 +602,47 @@ pub async fn get_dashboard_inner(
         }
     };
     let requested = DateRange { start, end };
-    let (input, observed_days, latest_observation_date) = dashboard_input(
+    let dashboard = dashboard_input(
         state,
         &requested,
         page_id.as_str(),
         &manifest.required_capabilities,
     )
     .await?;
-    let document = ComponentRuntime::default()
-        .invoke_dashboard(
-            &module,
-            input.clone(),
-            mfa_module_host::RuntimeLimits::default(),
+    let output = if module.enabled {
+        mfa_dashboard_host::validate_or_error_result(
+            ComponentRuntime::default()
+                .invoke_dashboard(
+                    &module,
+                    dashboard.input.clone(),
+                    mfa_module_host::RuntimeLimits::default(),
+                )
+                .await
+                .map(|document| document)
+                .map_err(|error| error.code().to_owned()),
+            &dashboard.input,
+            &base_localization_keys(),
         )
-        .await
-        .map_err(|error| {
-            command_error(
-                error.code(),
-                "the dashboard module could not render this page",
-            )
-        })?;
-    let localization_keys = base_localization_keys();
-    mfa_dashboard_host::validate_document(&document, &input, &localization_keys)
-        .map_err(|error| command_error(error.code(), "the dashboard document was rejected"))?;
-    let expected_days = requested.len_days();
+    } else {
+        mfa_dashboard_host::DashboardOutput::ModuleError(
+            mfa_dashboard_host::ModuleErrorView::from_code("dashboard_disabled"),
+        )
+    };
+    let title_key = match &output {
+        mfa_dashboard_host::DashboardOutput::Document(document) => document.title_key.clone(),
+        mfa_dashboard_host::DashboardOutput::ModuleError(error) => error.message_key.clone(),
+    };
     Ok(DashboardPageView {
         module_id: module_id.to_string(),
         page_id,
-        title_key: document.title_key.clone(),
-        document,
-        availability: dashboard_availability(state, "base", observed_days, expected_days),
-        coverage: CoverageView {
-            expected_days,
-            observed_days,
-            ratio: if expected_days == 0 {
-                0.0
-            } else {
-                observed_days as f64 / expected_days as f64
-            },
-            sufficient: observed_days.saturating_mul(2) >= expected_days,
-        },
+        title_key,
+        document: output,
+        availability: dashboard.availability,
+        coverage: dashboard.coverage,
         freshness: FreshnessView {
-            latest_observation_date: latest_observation_date.map(|date| date.to_string()),
+            latest_observation_date: dashboard
+                .latest_observation_date
+                .map(|date| date.to_string()),
             generated_at: Utc::now().to_rfc3339(),
         },
     })
@@ -763,41 +785,46 @@ pub async fn delete_phase_event_inner(
     }
 }
 
+struct DashboardInputResult {
+    input: DashboardInput,
+    latest_observation_date: Option<mfa_contracts::LocalDate>,
+    availability: AvailabilityView,
+    coverage: CoverageView,
+}
+
 async fn dashboard_input(
     state: &AppState,
     requested: &DateRange,
     page_id: &str,
     requirements: &[mfa_contracts::DashboardRequirement],
-) -> Result<(DashboardInput, u64, Option<mfa_contracts::LocalDate>), CommandError> {
+) -> Result<DashboardInputResult, CommandError> {
     let database = state
         .storage_lock()
         .map_err(CommandError::from)?
         .as_ref()
         .map(|storage| storage.database.clone());
     let providers = state.providers();
-    let mut snapshots = Vec::new();
+    let declared = declared_capabilities(requirements);
+    let module_ids = requirements
+        .iter()
+        .filter_map(|requirement| providers.active_providers.get(&requirement.capability))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut snapshots: Vec<(ModuleId, SnapshotResponse)> = Vec::new();
     if let Some(database) = database.as_ref() {
-        let module_ids = providers
-            .active_providers
-            .values()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        for module_id in module_ids {
+        for module_id in &module_ids {
             let keys = database
                 .execute(ListActiveSnapshotKeys {
-                    source_module_id: module_id,
+                    source_module_id: module_id.clone(),
                 })
                 .await
                 .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?;
             for key in keys {
-                snapshots.push(
-                    database
-                        .execute(QuerySnapshot::active(key))
-                        .await
-                        .map_err(|error| {
-                            command_error("snapshot_query_failed", &error.to_string())
-                        })?,
-                );
+                let snapshot = database
+                    .execute(QuerySnapshot::active(key))
+                    .await
+                    .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?;
+                snapshots.push((module_id.clone(), snapshot));
             }
         }
     }
@@ -810,54 +837,101 @@ async fn dashboard_input(
     let mut exercise_sets = Vec::new();
     let mut observed_dates = BTreeSet::new();
     let mut counts = BTreeMap::new();
-    for snapshot in &snapshots {
+    let body_weight = capability_id("body.weight");
+    let nutrition = capability_id("nutrition.items");
+    let activity_days_cap = capability_id("activity.days");
+    let activity_events_cap = capability_id("activity.events");
+    let heart_rate = capability_id("heart_rate.observations");
+    let strength_sessions = capability_id("strength.sessions");
+    let strength_sets = capability_id("strength.sets");
+    for (source_module_id, snapshot) in &snapshots {
         for record in &snapshot.canonical_records {
             let Ok(observation) = serde_json::from_value::<CanonicalObservation>(record.clone())
             else {
                 continue;
             };
             match observation {
-                CanonicalObservation::BodyMeasurement(value) => {
+                CanonicalObservation::BodyMeasurement(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &body_weight,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.local_date);
                     weight_observations.push(WeightObservation {
                         observation_id: value.body_measurement_id.to_string(),
                         local_date: value.local_date,
                         weight_kg: value.weight_kg,
                     });
-                    *counts.entry("body.weight").or_insert(0u64) += 1;
+                    *counts.entry(body_weight.clone()).or_insert(0u64) += 1;
                 }
-                CanonicalObservation::NutritionItem(value) => {
+                CanonicalObservation::NutritionItem(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &nutrition,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.local_date);
                     nutrition_items.push(value);
-                    *counts.entry("nutrition.items").or_insert(0) += 1;
+                    *counts.entry(nutrition.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::ActivityDay(value) => {
+                CanonicalObservation::ActivityDay(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &activity_days_cap,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.local_date);
                     activity_days.push(value);
-                    *counts.entry("activity.days").or_insert(0) += 1;
+                    *counts.entry(activity_days_cap.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::ActivityEvent(value) => {
+                CanonicalObservation::ActivityEvent(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &activity_events_cap,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.local_date);
                     activity_events.push(value);
-                    *counts.entry("activity.events").or_insert(0) += 1;
+                    *counts.entry(activity_events_cap.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::HeartRate(value) => {
+                CanonicalObservation::HeartRate(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &heart_rate,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.observed_local_at.0.date().into());
                     heart_rate_observations.push(value);
-                    *counts.entry("heart_rate.observations").or_insert(0) += 1;
+                    *counts.entry(heart_rate.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::WorkoutSession(value) => {
+                CanonicalObservation::WorkoutSession(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &strength_sessions,
+                        source_module_id,
+                    ) =>
+                {
                     observed_dates.insert(value.started_local_at.0.date().into());
                     workout_sessions.push(value);
-                    *counts.entry("strength.sessions").or_insert(0) += 1;
+                    *counts.entry(strength_sessions.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::ExerciseSet(value) => {
+                CanonicalObservation::ExerciseSet(value)
+                    if active_provider_matches(
+                        &providers.active_providers,
+                        &strength_sets,
+                        source_module_id,
+                    ) =>
+                {
                     exercise_sets.push(value);
-                    *counts.entry("strength.sets").or_insert(0) += 1;
+                    *counts.entry(strength_sets.clone()).or_insert(0) += 1;
                 }
-                CanonicalObservation::PhaseEvent(value) => {
-                    observed_dates.insert(value.start_date);
-                }
+                _ => {}
             }
         }
     }
@@ -869,9 +943,9 @@ async fn dashboard_input(
     } else {
         Vec::new()
     };
-    let snapshot_refs = snapshots
+    let mut snapshot_refs = snapshots
         .iter()
-        .filter_map(|snapshot| {
+        .filter_map(|(_, snapshot)| {
             snapshot
                 .snapshot_id
                 .map(|snapshot_id| mfa_analytics::SnapshotRef {
@@ -879,177 +953,300 @@ async fn dashboard_input(
                     snapshot_id: snapshot_id.to_string(),
                 })
         })
+        .collect::<Vec<_>>();
+    snapshot_refs.sort_by(|left, right| {
+        left.logical_snapshot_key
+            .cmp(&right.logical_snapshot_key)
+            .then_with(|| left.snapshot_id.cmp(&right.snapshot_id))
+    });
+    snapshot_refs.dedup();
+    let mapping_versions = module_ids
+        .iter()
+        .filter_map(|module_id| {
+            state.modules().into_iter().find_map(|module| {
+                (module.module_id == *module_id).then(|| match &module.manifest {
+                    ModuleManifest::Source(manifest) => {
+                        format!("{}@{}", module_id, manifest.mapping_version)
+                    }
+                    _ => format!("{}@unknown", module_id),
+                })
+            })
+        })
         .collect();
     let context = MetricContext {
         requested: *requested,
         as_of: requested.end,
-        snapshot_refs,
+        snapshot_refs: snapshot_refs.clone(),
         algorithm_version: mfa_analytics::AlgorithmVersion::new("base-analytics-v1"),
+        mapping_versions,
     };
     let weight = weight_analytics(&context, &weight_observations);
-    let nutrition = nutrition_analytics(
+    let nutrition_result = nutrition_analytics(
         &context,
         &nutrition_items,
         &excluded_dates(*requested, &phase_events),
     );
-    let activity = activity_analytics(
+    let activity_result = activity_analytics(
         &context,
         &activity_days,
         &activity_events,
         &heart_rate_observations,
     );
     let strength = strength_analytics(&context, &workout_sessions, &exercise_sets);
-    let tdee = rolling_tdee(
-        *requested,
-        &nutrition.days,
+    let tdee_window = requested
+        .trailing_ending(requested.end, 28)
+        .ok_or_else(|| command_error("invalid_date_range", "TDEE requires a 28-day window"))?;
+    let tdee_context = MetricContext {
+        requested: tdee_window,
+        ..context.clone()
+    };
+    let tdee = rolling_tdee_with_context(
+        &tdee_context,
+        &nutrition_result.days,
         &weight.daily_median,
         &phase_events,
     );
+    let tdee_provenance = match &tdee {
+        mfa_analytics::TdeeResult::Ready(estimate) => estimate.provenance.clone(),
+        mfa_analytics::TdeeResult::InsufficientCoverage(coverage) => {
+            let mut provenance = tdee_context.provenance(coverage.complete_nutrition_days as usize);
+            provenance.algorithm_version = mfa_analytics::AlgorithmVersion::new("tdee.rolling@1");
+            provenance
+        }
+    };
     let weight_value = json!({
         "observations": weight.observations,
         "dailyMedianKg": weight.daily_median,
         "trailing7dMeanKg": weight.trailing_7d_mean,
         "slope28d": weight.slope_28d,
         "phaseEvents": phase_events.clone(),
+        "provenance": weight.provenance,
+    });
+    let body_fat_value = json!({
+        "observations": weight.observations,
+        "provenance": weight.provenance,
     });
     let nutrition_value = json!({
-        "days": nutrition.days,
-        "trailing7dMeanCalories": nutrition.trailing_7d_mean_calories,
+        "days": nutrition_result.days,
+        "trailing7dMeanCalories": nutrition_result.trailing_7d_mean_calories,
         "phaseEvents": phase_events,
         "tdee": match tdee {
             mfa_analytics::TdeeResult::Ready(estimate) => {
                 json!({"state": "ready", "estimate": estimate})
             }
             mfa_analytics::TdeeResult::InsufficientCoverage(coverage) => {
-                json!({"state": "insufficient_coverage", "coverage": coverage})
+                json!({"state": "insufficient_coverage", "coverage": coverage, "provenance": tdee_provenance})
             }
         },
+        "provenance": nutrition_result.provenance,
     });
     let activity_value = json!({
-        "steps": activity
-            .steps
-            .iter()
-            .filter(|point| point.value.is_some())
-            .cloned()
-            .collect::<Vec<_>>(),
-        "mean_steps_7d": activity
-            .mean_steps_7d
-            .iter()
-            .filter(|point| point.value.is_some())
-            .cloned()
-            .collect::<Vec<_>>(),
-        "mean_steps_28d": activity
-            .mean_steps_28d
-            .iter()
-            .filter(|point| point.value.is_some())
-            .cloned()
-            .collect::<Vec<_>>(),
-        "events": activity
-            .events
-            .iter()
-            .filter(|event| {
-                event.accepted_event_count > 0
-                    || event.unknown_event_count > 0
-                    || event.duration_seconds.is_some()
-                    || event.distance_km.is_some()
-                    || event.estimated_calories_kcal.is_some()
-            })
-            .cloned()
-            .collect::<Vec<_>>(),
-        "heart_rate": activity
-            .heart_rate
-            .iter()
-            .filter(|point| point.value.is_some())
-            .cloned()
-            .collect::<Vec<_>>(),
-        "water": activity
-            .water
-            .iter()
-            .filter(|point| point.value.is_some())
-            .cloned()
-            .collect::<Vec<_>>(),
+        "steps": activity_result.steps.clone(),
+        "mean_steps_7d": activity_result.mean_steps_7d.clone(),
+        "mean_steps_28d": activity_result.mean_steps_28d.clone(),
+        "events": activity_result.events.clone(),
+        "heart_rate": activity_result.heart_rate.clone(),
+        "water": activity_result.water.clone(),
+        "provenance": activity_result.provenance.clone(),
+    });
+    let activity_events_value = json!({
+        "events": activity_result.events,
+        "provenance": activity_result.provenance,
+    });
+    let heart_rate_value = json!({
+        "observations": activity_result.heart_rate,
+        "provenance": activity_result.provenance,
     });
     let strength_value = json!({
         "session_counts": strength.session_counts,
         "session_durations": strength.session_durations,
         "working_sets": strength.working_sets,
         "weekly_best_e1rm": strength.weekly_best_e1rm,
+        "provenance": strength.provenance,
+    });
+    let strength_sets_value = json!({
+        "working_sets": strength.working_sets,
+        "weekly_best_e1rm": strength.weekly_best_e1rm,
+        "provenance": strength.provenance,
     });
     let observed_days = observed_dates
         .iter()
         .filter(|date| requested.contains(**date))
         .count() as u64;
     let mut capabilities = BTreeMap::new();
-    for requirement in requirements {
-        let name = requirement.capability.to_string();
-        capabilities.insert(
-            requirement.capability.clone(),
-            match name.as_str() {
-                "body.weight" => weight_value.clone(),
-                "nutrition.items" => nutrition_value.clone(),
-                "activity.days" | "activity.events" => activity_value.clone(),
-                "heart_rate.observations" => json!(activity.heart_rate),
-                "strength.sessions" | "strength.sets" => strength_value.clone(),
-                _ => json!({
-                    "recordCount": counts.get(name.as_str()).copied().unwrap_or_default(),
-                    "observedDays": observed_days,
-                }),
-            },
-        );
+    for requirement in requirements
+        .iter()
+        .filter(|requirement| declared.contains(&requirement.capability))
+    {
+        let name = requirement.capability.as_str();
+        let value = match name {
+            "body.weight" => weight_value.clone(),
+            "body.fat_percentage" => body_fat_value.clone(),
+            "nutrition.items" => nutrition_value.clone(),
+            "activity.days" => activity_value.clone(),
+            "activity.events" => activity_events_value.clone(),
+            "heart_rate.observations" => heart_rate_value.clone(),
+            "strength.sessions" => strength_value.clone(),
+            "strength.sets" => strength_sets_value.clone(),
+            _ => json!({
+                "recordCount": counts.get(&requirement.capability).copied().unwrap_or_default(),
+                "observedDays": observed_days,
+            }),
+        };
+        capabilities.insert(requirement.capability.clone(), value);
     }
-    capabilities.insert(
-        CapabilityId::try_from("heart_rate.observations")
-            .map_err(|error| command_error("invalid_capability", &error.to_string()))?,
-        json!(activity.heart_rate),
+    let expected_days = requested.len_days();
+    let coverage = CoverageView {
+        expected_days,
+        observed_days,
+        ratio: if expected_days == 0 {
+            0.0
+        } else {
+            observed_days as f64 / expected_days as f64
+        },
+        sufficient: observed_days.saturating_mul(2) >= expected_days,
+    };
+    let availability = dashboard_availability(
+        state,
+        "base",
+        requirements,
+        &providers.active_providers,
+        &snapshots,
+        observed_days,
+        requested,
     );
-    capabilities.insert(
-        CapabilityId::try_from("dashboard.page")
-            .map_err(|error| command_error("invalid_dashboard_page", &error.to_string()))?,
-        json!(page_id),
-    );
-    Ok((
-        DashboardInput {
+    Ok(DashboardInputResult {
+        input: DashboardInput {
+            page_id: Some(page_id.to_owned()),
             capabilities,
             extensions: BTreeMap::new(),
         },
-        observed_days,
-        observed_dates.iter().next_back().copied(),
-    ))
+        latest_observation_date: observed_dates.iter().next_back().copied(),
+        availability,
+        coverage,
+    })
 }
 
 fn dashboard_availability(
     state: &AppState,
     module_id: &str,
+    requirements: &[mfa_contracts::DashboardRequirement],
+    active_providers: &BTreeMap<CapabilityId, ModuleId>,
+    snapshots: &[(ModuleId, SnapshotResponse)],
     observed_days: u64,
-    expected_days: u64,
+    requested: &DateRange,
 ) -> AvailabilityView {
-    let Some(module) = state
+    let dashboard = state
         .modules()
         .into_iter()
-        .find(|module| module.module_id.as_str() == module_id)
-    else {
-        return AvailabilityView {
-            state: AvailabilityState::MissingDependency,
-            reason_key: "dashboard.module_missing".to_owned(),
-            required_capabilities: Vec::new(),
-            required_dependencies: vec![module_id.to_owned()],
-        };
+        .find(|module| module.module_id.as_str() == module_id);
+    let modules = ModuleRegistryView {
+        disabled_by_user: dashboard.as_ref().is_some_and(|module| !module.enabled),
+        missing_dependency: dashboard.is_none(),
+        incompatible_contract: false,
+        freshness: if observed_days > 0 && observed_days < requested.len_days() {
+            Freshness::Stale
+        } else {
+            Freshness::Fresh
+        },
     };
-    let state_value = if !module.enabled {
-        AvailabilityState::DisabledByUser
-    } else if observed_days == 0 {
-        AvailabilityState::WaitingForData
-    } else if observed_days.saturating_mul(2) < expected_days {
-        AvailabilityState::InsufficientCoverage
-    } else {
-        AvailabilityState::Ready
-    };
+    let snapshot_modules = snapshots
+        .iter()
+        .map(|(module_id, _)| module_id)
+        .collect::<BTreeSet<_>>();
+    let mut registry = ResolvedCapabilities::default();
+    let mut coverage = CoverageCatalog::default();
+    for requirement in requirements {
+        let provider = active_providers.get(&requirement.capability).cloned();
+        let contract_compatible = provider.as_ref().is_some_and(|provider| {
+            state.modules().into_iter().any(|module| {
+                module.module_id == *provider
+                    && matches!(
+                        &module.manifest,
+                        ModuleManifest::Source(manifest)
+                            if manifest.provided_capabilities.contains(&requirement.capability)
+                    )
+            })
+        });
+        let has_successful_snapshot = provider
+            .as_ref()
+            .is_some_and(|provider| snapshot_modules.contains(provider));
+        registry.capabilities.insert(
+            requirement.capability.clone(),
+            ResolvedCapability {
+                provider,
+                contract_compatible,
+                has_successful_snapshot,
+                freshness: modules.freshness,
+            },
+        );
+        coverage.sufficient.insert(
+            requirement.capability.clone(),
+            observed_days.saturating_mul(2) >= requested.len_days(),
+        );
+    }
+    let resolver = AvailabilityResolver;
+    let best = requirements
+        .iter()
+        .map(|requirement| resolver.resolve(requirement, &registry, &coverage, &modules))
+        .min_by_key(|availability| availability_rank(&availability.state));
+    let (state_value, freshness, reason_key, action) = best
+        .map(|availability| {
+            (
+                availability.state,
+                availability.freshness,
+                availability.message_key,
+                availability.action,
+            )
+        })
+        .unwrap_or((
+            AvailabilityState::Ready,
+            modules.freshness,
+            "dashboard.ready".to_owned(),
+            None,
+        ));
     AvailabilityView {
         state: state_value,
-        reason_key: "dashboard.availability".to_owned(),
-        required_capabilities: Vec::new(),
-        required_dependencies: Vec::new(),
+        reason_key,
+        required_capabilities: requirements
+            .iter()
+            .map(|requirement| requirement.capability.to_string())
+            .collect(),
+        required_dependencies: if modules.missing_dependency {
+            vec![module_id.to_owned()]
+        } else {
+            Vec::new()
+        },
+        freshness,
+        action,
     }
+}
+
+fn missing_dashboard_availability(module_id: &str) -> AvailabilityView {
+    AvailabilityView {
+        state: AvailabilityState::MissingDependency,
+        reason_key: "dashboard.missing_dependency".to_owned(),
+        required_capabilities: Vec::new(),
+        required_dependencies: vec![module_id.to_owned()],
+        freshness: Freshness::Fresh,
+        action: Some("dashboard.action.configure_source".to_owned()),
+    }
+}
+
+fn availability_rank(state: &AvailabilityState) -> u8 {
+    match state {
+        AvailabilityState::DisabledByUser => 0,
+        AvailabilityState::MissingDependency => 1,
+        AvailabilityState::IncompatibleContract => 2,
+        AvailabilityState::MissingCapability => 3,
+        AvailabilityState::WaitingForData => 4,
+        AvailabilityState::InsufficientCoverage => 5,
+        AvailabilityState::Ready => 6,
+    }
+}
+
+fn capability_id(value: &str) -> CapabilityId {
+    CapabilityId::try_from(value).expect("built-in capability is valid")
 }
 
 fn base_localization_keys() -> BTreeSet<String> {
@@ -1227,7 +1424,11 @@ fn catalog_install_state_for_inspect_error(code: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog_install_state, catalog_install_state_for_inspect_error};
+    use super::{
+        active_provider_matches, catalog_install_state, catalog_install_state_for_inspect_error,
+        declared_capabilities,
+    };
+    use mfa_contracts::{CapabilityId, DashboardRequirement, ModuleId};
 
     #[test]
     fn incompatible_package_errors_have_an_explicit_catalog_state() {
@@ -1251,6 +1452,32 @@ mod tests {
             catalog_install_state_for_inspect_error("incompatible_app_version"),
             "incompatible"
         );
+    }
+
+    #[test]
+    fn dashboard_grants_are_limited_to_manifest_requirements() {
+        let requirements = vec![DashboardRequirement {
+            capability: CapabilityId::try_from("body.weight").unwrap(),
+            extension: None,
+        }];
+        let declared = declared_capabilities(&requirements);
+        assert_eq!(declared.len(), 1);
+        assert!(declared.contains(&CapabilityId::try_from("body.weight").unwrap()));
+        assert!(!declared.contains(&CapabilityId::try_from("heart_rate.observations").unwrap()));
+        assert!(!declared.contains(&CapabilityId::try_from("dashboard.page").unwrap()));
+    }
+
+    #[test]
+    fn selected_provider_changes_the_records_admitted_for_a_capability() {
+        let left = ModuleId::try_from("provider-left").unwrap();
+        let right = ModuleId::try_from("provider-right").unwrap();
+        let capability = CapabilityId::try_from("body.weight").unwrap();
+        let mut active = std::collections::BTreeMap::from([(capability.clone(), left.clone())]);
+        assert!(active_provider_matches(&active, &capability, &left));
+        assert!(!active_provider_matches(&active, &capability, &right));
+        active.insert(capability.clone(), right.clone());
+        assert!(!active_provider_matches(&active, &capability, &left));
+        assert!(active_provider_matches(&active, &capability, &right));
     }
 }
 
@@ -1639,4 +1866,23 @@ pub async fn retry_asset(
     state: tauri::State<'_, AppState>,
 ) -> Result<AttemptView, CommandError> {
     retry_asset_inner(&state, asset_id).await
+}
+
+fn declared_capabilities(
+    requirements: &[mfa_contracts::DashboardRequirement],
+) -> BTreeSet<CapabilityId> {
+    requirements
+        .iter()
+        .map(|requirement| requirement.capability.clone())
+        .collect()
+}
+
+fn active_provider_matches(
+    active_providers: &BTreeMap<CapabilityId, ModuleId>,
+    capability: &CapabilityId,
+    source_module_id: &ModuleId,
+) -> bool {
+    active_providers
+        .get(capability)
+        .is_some_and(|active| active == source_module_id)
 }

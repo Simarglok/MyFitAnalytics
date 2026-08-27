@@ -24,6 +24,8 @@ pub enum AvailabilityState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DashboardInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_id: Option<String>,
     #[serde(default)]
     pub capabilities: BTreeMap<CapabilityId, Value>,
     #[serde(default)]
@@ -40,6 +42,7 @@ pub enum DashboardBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardCard {
     pub key: String,
     pub label: String,
@@ -47,6 +50,7 @@ pub struct DashboardCard {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardTable {
     pub key: String,
     pub columns: Vec<String>,
@@ -54,6 +58,7 @@ pub struct DashboardTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardStatusPanel {
     pub key: String,
     pub state: AvailabilityState,
@@ -61,6 +66,7 @@ pub struct DashboardStatusPanel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardChart {
     pub key: String,
     pub chart_type: String,
@@ -68,12 +74,14 @@ pub struct DashboardChart {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardSeries {
     pub name: String,
-    pub points: Vec<(String, f64)>,
+    pub points: Vec<(String, Option<f64>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardDocument {
     pub title_key: String,
     pub blocks: Vec<DashboardBlock>,

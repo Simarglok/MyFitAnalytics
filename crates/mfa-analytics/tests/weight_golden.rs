@@ -17,6 +17,7 @@ fn context(start: &str, end: &str) -> MetricContext {
             snapshot_id: "snapshot-1".to_owned(),
         }],
         algorithm_version: AlgorithmVersion::new("weight.theil_sen@1"),
+        mapping_versions: Vec::new(),
     }
 }
 

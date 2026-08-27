@@ -19,6 +19,7 @@ fn context() -> MetricContext {
             snapshot_id: "snapshot-nutrition".to_owned(),
         }],
         algorithm_version: AlgorithmVersion::new("nutrition.daily@1"),
+        mapping_versions: Vec::new(),
     }
 }
 

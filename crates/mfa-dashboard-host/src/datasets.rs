@@ -48,6 +48,7 @@ impl DatasetResolver {
         _request: DateRange,
     ) -> Result<DashboardInput, DashboardError> {
         let mut input = DashboardInput {
+            page_id: None,
             capabilities: BTreeMap::new(),
             extensions: BTreeMap::new(),
         };

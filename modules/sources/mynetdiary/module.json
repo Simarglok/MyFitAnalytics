@@ -6,7 +6,7 @@
   "source_api_version": "1.0.0",
   "mapping_version": "1.0.0",
   "compatible_app_versions": [">=0.1.0"],
-  "provided_capabilities": ["nutrition.items", "activity.events"],
+  "provided_capabilities": ["nutrition.items", "activity.events", "heart_rate.observations"],
   "accepted_file_patterns": ["*.xls", "application/vnd.ms-excel"],
   "artifact_signatures": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
   "extension_contracts": [

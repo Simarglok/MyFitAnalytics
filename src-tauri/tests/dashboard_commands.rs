@@ -1,5 +1,6 @@
 use mfa_config::{AppSettings, SettingsStore};
 use mfa_contracts::DashboardBlock;
+use mfa_dashboard_host::DashboardOutput;
 use mfa_module_host::PackageInstaller;
 use myfitanalytics::commands::{
     choose_workspace_root_inner, get_dashboard_inner, get_navigation_inner, save_phase_event_inner,
@@ -75,9 +76,11 @@ async fn navigation_and_dashboard_commands_return_safe_typed_views() {
     .unwrap();
     assert_eq!(dashboard.page_id, "overview");
     assert!(dashboard.coverage.observed_days <= dashboard.coverage.expected_days);
+    let DashboardOutput::Document(document) = &dashboard.document else {
+        panic!("expected a dashboard document");
+    };
     assert!(
-        dashboard
-            .document
+        document
             .blocks
             .iter()
             .any(|block| matches!(block, DashboardBlock::Chart(_)))

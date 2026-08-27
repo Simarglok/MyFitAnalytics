@@ -14,4 +14,5 @@ pub use document::{
 };
 pub use validator::{
     DocumentValidationError, validate_document, validate_document_json, validate_or_error,
+    validate_or_error_result,
 };

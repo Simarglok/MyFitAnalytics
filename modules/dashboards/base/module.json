@@ -8,6 +8,7 @@
   "compatible_app_versions": [">=0.1.0"],
   "required_capabilities": [
     {"capability": "activity.days"},
+    {"capability": "heart_rate.observations"},
     {"capability": "body.fat_percentage"},
     {"capability": "body.weight"},
     {"capability": "nutrition.items"},

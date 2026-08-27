@@ -2,8 +2,8 @@ use mfa_archive::ArchiveReconciler;
 use mfa_config::{AppSettings, SettingsStore, WorkspacePaths};
 use mfa_contracts::{AvailabilityState, CapabilityId, DashboardRequirement, ModuleId};
 use mfa_dashboard_host::{
-    AvailabilityResolver, CoverageCatalog, Freshness, ModuleRegistryView, ResolvedCapabilities,
-    ResolvedCapability,
+    AvailabilityResolver, CoverageCatalog, DashboardOutput, Freshness, ModuleRegistryView,
+    ResolvedCapabilities, ResolvedCapability,
 };
 use mfa_module_host::{CapabilityRegistry, ModuleRegistry, PackageInstaller};
 use myfitanalytics::commands::{
@@ -106,6 +106,13 @@ fn block_keys(document: &mfa_contracts::DashboardDocument) -> BTreeSet<String> {
         .collect()
 }
 
+fn dashboard_document(output: &DashboardOutput) -> &mfa_contracts::DashboardDocument {
+    match output {
+        DashboardOutput::Document(document) => document,
+        DashboardOutput::ModuleError(error) => panic!("unexpected module error: {}", error.code),
+    }
+}
+
 fn state_name(state: &AvailabilityState) -> &'static str {
     match state {
         AvailabilityState::DisabledByUser => "disabled_by_user",
@@ -130,6 +137,22 @@ fn card_value<'a>(document: &'a mfa_contracts::DashboardDocument, key: &str) -> 
     card.value
         .get("value")
         .unwrap_or_else(|| panic!("dashboard card {key} is unavailable"))
+}
+
+fn chart_points(document: &mfa_contracts::DashboardDocument, key: &str) -> Vec<Value> {
+    let chart = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            mfa_contracts::DashboardBlock::Chart(chart) if chart.key == key => Some(chart),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("dashboard chart {key} is missing"));
+    serde_json::to_value(&chart.series[0].points)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone()
 }
 
 fn point_for_date<'a>(points: &'a [Value], date: &str) -> &'a Value {
@@ -444,7 +467,7 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
             expected_page["availabilityState"].as_str().unwrap()
         );
         assert_eq!(
-            block_keys(&page.document),
+            block_keys(dashboard_document(&page.document)),
             expected_page["requiredBlockKeys"]
                 .as_array()
                 .unwrap()
@@ -460,7 +483,7 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     let body_page = get_dashboard_inner("base".to_owned(), "body".to_owned(), range.clone(), &app)
         .await
         .unwrap();
-    let body_value = card_value(&body_page.document, "body.raw_weight");
+    let body_value = card_value(dashboard_document(&body_page.document), "body.raw_weight");
     let expected_weights = expected_analytics["body"]["weightsKg"].as_array().unwrap();
     let observations = body_value["observations"].as_array().unwrap();
     assert_eq!(observations.len(), expected_weights.len());
@@ -504,6 +527,22 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         &expected_analytics["body"]["slope28dPerDay"],
         "body.slope28dPerDay",
     );
+    let body_chart_points =
+        chart_points(dashboard_document(&body_page.document), "body.weight.trend");
+    assert!(!body_chart_points.is_empty());
+    assert!(body_chart_points.iter().any(|point| point[1].is_null()));
+    let chart_weight = body_chart_points
+        .iter()
+        .find(|point| point[0] == "2026-02-02")
+        .and_then(|point| point[1].as_f64())
+        .expect("body chart has a populated semantic point");
+    let card_weight = point_for_date(
+        body_value["trailing7dMeanKg"].as_array().unwrap(),
+        "2026-02-02",
+    )["value"]
+        .as_f64()
+        .unwrap();
+    assert_golden_number(chart_weight, &Value::from(card_weight), "body.chartWeight");
 
     let nutrition_page = get_dashboard_inner(
         "base".to_owned(),
@@ -513,7 +552,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     )
     .await
     .unwrap();
-    let nutrition_value = card_value(&nutrition_page.document, "nutrition.calories");
+    let nutrition_value = card_value(
+        dashboard_document(&nutrition_page.document),
+        "nutrition.calories",
+    );
     let nutrition_days = nutrition_value["days"].as_array().unwrap();
     assert_eq!(
         nutrition_days
@@ -578,7 +620,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     )
     .await
     .unwrap();
-    let activity_value = card_value(&activity_page.document, "activity.steps");
+    let activity_value = card_value(
+        dashboard_document(&activity_page.document),
+        "activity.steps",
+    );
     let activity_date = expected_analytics["activity"]["observedDate"]
         .as_str()
         .unwrap();
@@ -667,7 +712,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     )
     .await
     .unwrap();
-    let strength_value = card_value(&strength_page.document, "strength.sessions");
+    let strength_value = card_value(
+        dashboard_document(&strength_page.document),
+        "strength.sessions",
+    );
     for (field, golden) in [
         ("seven_day", "sessions7d"),
         ("fourteen_day", "sessions14d"),
@@ -788,7 +836,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         get_dashboard_inner("base".to_owned(), "body".to_owned(), range.clone(), &app)
             .await
             .unwrap();
-    let body_after_value = card_value(&body_after_phase.document, "body.raw_weight");
+    let body_after_value = card_value(
+        dashboard_document(&body_after_phase.document),
+        "body.raw_weight",
+    );
     let persisted_phases = body_after_value["phaseEvents"].as_array().unwrap();
     assert_eq!(persisted_phases.len(), 1);
     assert_eq!(
@@ -804,7 +855,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
     )
     .await
     .unwrap();
-    let tdee_after_phase = card_value(&nutrition_after_phase.document, "nutrition.calories");
+    let tdee_after_phase = card_value(
+        dashboard_document(&nutrition_after_phase.document),
+        "nutrition.calories",
+    );
     assert_eq!(
         tdee_after_phase["tdee"]["coverage"]["excluded_days"],
         expected["analytics"]["tdee"]["excludedDaysAfterPhase"].clone()

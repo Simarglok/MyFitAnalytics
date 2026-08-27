@@ -175,6 +175,7 @@ pub fn dashboard_input() -> DashboardInput {
     let mut capabilities = BTreeMap::new();
     capabilities.insert(CapabilityId::try_from("body.weight").unwrap(), json!(82.5));
     DashboardInput {
+        page_id: None,
         capabilities,
         extensions: BTreeMap::new(),
     }

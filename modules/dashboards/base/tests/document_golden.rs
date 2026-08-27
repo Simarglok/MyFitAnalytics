@@ -11,6 +11,7 @@ fn capability(name: &str) -> CapabilityId {
 
 fn ready_input() -> DashboardInput {
     DashboardInput {
+        page_id: None,
         capabilities: BTreeMap::from([
             (
                 capability("body.weight"),
@@ -37,6 +38,7 @@ fn ready_input() -> DashboardInput {
 
 fn empty_input() -> DashboardInput {
     DashboardInput {
+        page_id: None,
         capabilities: BTreeMap::new(),
         extensions: BTreeMap::new(),
     }
@@ -146,4 +148,41 @@ fn wit_adapter_describes_base_and_selects_requested_page() {
             .unwrap();
     assert_eq!(document.title_key, "base.body.title");
     assert_golden(&document, "body-ready.json");
+}
+
+#[test]
+fn chart_extracts_object_dataset_points_and_preserves_gaps() {
+    let input = DashboardInput {
+        page_id: None,
+        capabilities: BTreeMap::from([(
+            capability("body.weight"),
+            json!({
+                "trailing7dMeanKg": [
+                    {"local_date": "2026-01-01", "value": 82.5},
+                    {"local_date": "2026-01-02", "value": null},
+                    {"local_date": "2026-01-03", "value": 82.2}
+                ]
+            }),
+        )]),
+        extensions: BTreeMap::new(),
+    };
+
+    let document = compose_page(BasePage::Body, &input);
+    let chart = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            DashboardBlock::Chart(chart) => Some(chart),
+            _ => None,
+        })
+        .expect("body page chart");
+
+    assert_eq!(
+        serde_json::to_value(&chart.series[0].points).unwrap(),
+        json!([
+            ["2026-01-01", 82.5],
+            ["2026-01-02", null],
+            ["2026-01-03", 82.2]
+        ])
+    );
 }

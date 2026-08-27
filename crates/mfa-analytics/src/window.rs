@@ -38,7 +38,10 @@ impl DateRange {
         if days <= 0 {
             return None;
         }
-        let start = LocalDate::from(end.0.checked_sub_days(chrono::Days::new(days as u64))?);
+        let start = LocalDate::from(
+            end.0
+                .checked_sub_days(chrono::Days::new((days as u64).saturating_sub(1)))?,
+        );
         Some(Self::inclusive(start, end))
     }
 }
