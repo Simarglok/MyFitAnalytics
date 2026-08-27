@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="${1:-$ROOT/target/release/bundle/macos/MyFitAnalytics.app}"
-REQUIRED_ENTITLEMENT="com.apple.security.cs.allow-unsigned-executable-memory"
+REQUIRED_ENTITLEMENTS=(
+    "com.apple.security.cs.allow-unsigned-executable-memory"
+    "com.apple.security.cs.disable-library-validation"
+)
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     printf 'macOS signing assertion skipped on non-macOS host\n'
@@ -27,7 +30,11 @@ ENTITLEMENTS="<?xml${ENTITLEMENTS}"
 ENTITLEMENTS="${ENTITLEMENTS%%</plist>*}</plist>"
 
 printf '%s\n' "$ENTITLEMENTS" | plutil -lint - >/dev/null
-ENTITLEMENT_VALUE="$(printf '%s\n' "$ENTITLEMENTS" | ENTITLEMENT_KEY="$REQUIRED_ENTITLEMENT" python3 -c '
+verify_entitlement() {
+    local required_entitlement="$1"
+    local entitlement_value
+
+    entitlement_value="$(printf '%s\n' "$ENTITLEMENTS" | ENTITLEMENT_KEY="$required_entitlement" python3 -c '
 import os
 import plistlib
 import sys
@@ -37,9 +44,14 @@ key = os.environ["ENTITLEMENT_KEY"]
 print(str(plist.get(key, False)).lower())
 ')"
 
-if [[ "$ENTITLEMENT_VALUE" != "true" ]]; then
-    printf 'required entitlement is not true: %s\n' "$REQUIRED_ENTITLEMENT" >&2
-    exit 1
-fi
+    if [[ "$entitlement_value" != "true" ]]; then
+        printf 'required entitlement is not true: %s\n' "$required_entitlement" >&2
+        exit 1
+    fi
 
-printf 'verified macOS entitlement: %s=true\n' "$REQUIRED_ENTITLEMENT"
+    printf 'verified macOS entitlement: %s=true\n' "$required_entitlement"
+}
+
+for required_entitlement in "${REQUIRED_ENTITLEMENTS[@]}"; do
+    verify_entitlement "$required_entitlement"
+done
