@@ -1,0 +1,85 @@
+{
+  "title_key": "base.activity.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "activity.steps",
+        "label": "base.activity.steps",
+        "value": {
+          "available": true,
+          "value": {
+            "accepted_events": 2,
+            "steps": 9000
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "activity.events",
+        "label": "base.activity.events",
+        "value": {
+          "available": true,
+          "value": {
+            "accepted_events": 2,
+            "steps": 9000
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "activity.heart_rate",
+        "label": "base.activity.heart_rate",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.activity.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "activity.water",
+        "label": "base.activity.water",
+        "value": {
+          "available": true,
+          "value": {
+            "accepted_events": 2,
+            "steps": 9000
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "activity.steps.trend",
+        "chart_type": "bar",
+        "series": [
+          {
+            "name": "base.activity.steps",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "activity.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.activity.ready"
+      }
+    }
+  ]
+}

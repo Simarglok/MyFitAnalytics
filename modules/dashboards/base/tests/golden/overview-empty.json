@@ -1,0 +1,58 @@
+{
+  "title_key": "base.overview.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.body_weight",
+        "label": "base.overview.body_weight",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.overview.body_weight",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.nutrition",
+        "label": "base.overview.nutrition",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.overview.nutrition",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "overview.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.overview.trend",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "overview.quality",
+        "state": {
+          "type": "missing_capability"
+        },
+        "message_key": "base.body.missing"
+      }
+    }
+  ]
+}

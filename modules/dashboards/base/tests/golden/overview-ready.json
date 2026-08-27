@@ -1,0 +1,71 @@
+{
+  "title_key": "base.overview.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.body_weight",
+        "label": "base.overview.body_weight",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.nutrition",
+        "label": "base.overview.nutrition",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "overview.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.overview.trend",
+            "points": [
+              [
+                "2026-01-01",
+                82.5
+              ],
+              [
+                "2026-01-02",
+                82.3
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "overview.quality",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.overview.quality_ready"
+      }
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "title_key": "base.body.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "body.raw_weight",
+        "label": "base.body.raw_weight",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.body.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.daily_median",
+        "label": "base.body.daily_median",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.body.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.trailing_mean",
+        "label": "base.body.trailing_mean",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.body.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.phase_overlay",
+        "label": "base.body.phase_overlay",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.body.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "body.weight.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.body.trend",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "body.status",
+        "state": {
+          "type": "missing_capability"
+        },
+        "message_key": "base.body.missing"
+      }
+    }
+  ]
+}

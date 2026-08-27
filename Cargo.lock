@@ -2770,6 +2770,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-dashboard-base"
+version = "0.1.0"
+dependencies = [
+ "mfa-contracts",
+ "mfa-dashboard-host",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "mfa-dashboard-host"
+version = "0.1.0"
+dependencies = [
+ "mfa-analytics",
+ "mfa-contracts",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "mfa-db"
 version = "0.1.0"
 dependencies = [

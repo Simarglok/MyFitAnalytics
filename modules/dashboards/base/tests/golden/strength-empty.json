@@ -1,0 +1,88 @@
+{
+  "title_key": "base.strength.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.sessions",
+        "label": "base.strength.sessions",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.strength.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.duration",
+        "label": "base.strength.duration",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.strength.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.sets",
+        "label": "base.strength.sets",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.strength.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.e1rm",
+        "label": "base.strength.e1rm",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.strength.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "strength.sessions.calendar",
+        "chart_type": "calendar_heatmap",
+        "series": [
+          {
+            "name": "base.strength.sessions",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "strength.status",
+        "state": {
+          "type": "missing_capability"
+        },
+        "message_key": "base.strength.missing"
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "title_key": "base.body.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "body.raw_weight",
+        "label": "base.body.raw_weight",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.daily_median",
+        "label": "base.body.daily_median",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.trailing_mean",
+        "label": "base.body.trailing_mean",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "body.phase_overlay",
+        "label": "base.body.phase_overlay",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "body.weight.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.body.trend",
+            "points": [
+              [
+                "2026-01-01",
+                82.5
+              ],
+              [
+                "2026-01-02",
+                82.3
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "body.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.body.ready"
+      }
+    }
+  ]
+}

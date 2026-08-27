@@ -1,0 +1,19 @@
+[package]
+name = "mfa-dashboard-base"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mfa-contracts = { path = "../../../crates/mfa-contracts" }
+serde.workspace = true
+serde_json.workspace = true
+wit-bindgen = "=0.46.0"
+
+[dev-dependencies]
+mfa-dashboard-host = { path = "../../../crates/mfa-dashboard-host" }

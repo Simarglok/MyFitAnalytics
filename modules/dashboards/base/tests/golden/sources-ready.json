@@ -1,0 +1,79 @@
+{
+  "title_key": "base.sources.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.modules",
+        "label": "base.sources.modules",
+        "value": {
+          "state": "ready"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.providers",
+        "label": "base.sources.providers",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.snapshots",
+        "label": "base.sources.snapshots",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.quality",
+        "label": "base.sources.quality",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "sources.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.sources.ready"
+      }
+    }
+  ]
+}

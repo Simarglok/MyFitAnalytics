@@ -1,0 +1,84 @@
+{
+  "title_key": "base.nutrition.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.calories",
+        "label": "base.nutrition.calories",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.macros",
+        "label": "base.nutrition.macros",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.trailing_mean",
+        "label": "base.nutrition.trailing_mean",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.tdee",
+        "label": "base.nutrition.tdee",
+        "value": {
+          "available": true,
+          "value": {
+            "calories": 2400,
+            "complete_days": 28
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "nutrition.calorie.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.nutrition.trailing_mean",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "nutrition.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.nutrition.ready"
+      }
+    }
+  ]
+}

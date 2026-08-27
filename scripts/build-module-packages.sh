@@ -31,3 +31,11 @@ for module in mynetdiary hevy; do
     --output "$DIST/${module}.mfasource"
   printf 'built %s.mfasource\n' "$module"
 done
+
+cargo component build --manifest-path "$ROOT/modules/dashboards/base/Cargo.toml" \
+  --release --target wasm32-unknown-unknown
+python3 "$ROOT/modules/sdk/tools/build_mfadashboard.py" \
+  --wasm "$ROOT/target/wasm32-unknown-unknown/release/mfa_dashboard_base.wasm" \
+  --module-dir "$ROOT/modules/dashboards/base" \
+  --output "$DIST/base.mfadashboard"
+printf '%s\n' 'built base.mfadashboard'

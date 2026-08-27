@@ -1,0 +1,88 @@
+{
+  "title_key": "base.nutrition.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.calories",
+        "label": "base.nutrition.calories",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.nutrition.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.macros",
+        "label": "base.nutrition.macros",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.nutrition.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.trailing_mean",
+        "label": "base.nutrition.trailing_mean",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.nutrition.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "nutrition.tdee",
+        "label": "base.nutrition.tdee",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.nutrition.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "nutrition.calorie.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.nutrition.trailing_mean",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "nutrition.status",
+        "state": {
+          "type": "missing_capability"
+        },
+        "message_key": "base.nutrition.missing"
+      }
+    }
+  ]
+}

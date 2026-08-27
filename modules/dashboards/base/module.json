@@ -1,0 +1,19 @@
+{
+  "module_type": "dashboard",
+  "module_id": "base",
+  "module_version": "1.0.0",
+  "package_format_version": "1.0.0",
+  "dashboard_api_version": "1.0.0",
+  "entrypoint_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "compatible_app_versions": [">=0.1.0"],
+  "required_capabilities": [
+    {"capability": "activity.days"},
+    {"capability": "body.fat_percentage"},
+    {"capability": "body.weight"},
+    {"capability": "nutrition.items"},
+    {"capability": "strength.sessions"},
+    {"capability": "strength.sets"}
+  ],
+  "required_extension_contracts": [],
+  "localization_namespace": "base"
+}
