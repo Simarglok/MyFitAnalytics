@@ -17,12 +17,12 @@ use tokio::sync::{mpsc, oneshot};
 pub use command::{
     ArchiveAssetRecord, AssetRegistration, CommitSnapshot, CreatePhaseEvent, DatabaseCommand,
     DeletePhaseEvent, FailAttempt, FailAttemptResult, HealthCheck, HealthCheckResult,
-    IntoDatabaseCommand, ListPhaseEvents, ListQualityItems, ListQualityItemsResult,
-    MarkInterrupted, MarkInterruptedResult, QueryAttempt, QueryAttemptResult, QuerySnapshot,
-    QueryView, ReconcileArchive, ReconcileArchiveInventory, ReconcileArchiveInventoryResult,
-    ReconcileArchiveResult, RegisterAsset, RegisterAssetResult, RegisterReceipt,
-    RegisterReceiptResult, Shutdown, SnapshotResponse, StartAttempt, StartAttemptResult,
-    UpdatePhaseEvent,
+    IntoDatabaseCommand, ListActiveSnapshotKeys, ListPhaseEvents, ListQualityItems,
+    ListQualityItemsResult, MarkInterrupted, MarkInterruptedResult, QueryAttempt,
+    QueryAttemptResult, QuerySnapshot, QueryView, ReconcileArchive, ReconcileArchiveInventory,
+    ReconcileArchiveInventoryResult, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
+    RegisterReceipt, RegisterReceiptResult, Shutdown, SnapshotResponse, StartAttempt,
+    StartAttemptResult, UpdatePhaseEvent,
 };
 pub use error::DatabaseError;
 pub use fault::{

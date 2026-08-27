@@ -5,14 +5,17 @@ use crate::view_models::{
     NavigationItemView, NavigationView, PhaseEventInput, PhaseEventView, ProviderView,
 };
 use chrono::Utc;
-use mfa_analytics::{DateRange, MetricContext, WeightObservation, weight_analytics};
+use mfa_analytics::{
+    DateRange, MetricContext, WeightObservation, activity_analytics, excluded_dates,
+    nutrition_analytics, rolling_tdee, strength_analytics, weight_analytics,
+};
 use mfa_contracts::{
     AvailabilityState, CanonicalObservation, CapabilityId, DashboardInput, ModuleId,
     ModuleManifest, ModuleType, PhaseEvent,
 };
 use mfa_db::{
-    CreatePhaseEvent, DeletePhaseEvent, HealthCheck, ListPhaseEvents, ListQualityItems,
-    LogicalSnapshotKey, QuerySnapshot, UpdatePhaseEvent,
+    CreatePhaseEvent, DeletePhaseEvent, HealthCheck, ListActiveSnapshotKeys, ListPhaseEvents,
+    ListQualityItems, QuerySnapshot, UpdatePhaseEvent,
 };
 use mfa_ingestion::{HealthSnapshot, HealthState, IngestionCoordinator, RecoveryMode, now_request};
 use mfa_module_host::{ComponentRuntime, InstalledModule, PackageInstaller, UninstallTransaction};
@@ -773,19 +776,38 @@ async fn dashboard_input(
         .map(|storage| storage.database.clone());
     let providers = state.providers();
     let mut snapshots = Vec::new();
-    if let Some(database) = database {
-        for module_id in providers.active_providers.values() {
-            let key = LogicalSnapshotKey::new(module_id.to_string())
+    if let Some(database) = database.as_ref() {
+        let module_ids = providers
+            .active_providers
+            .values()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for module_id in module_ids {
+            let keys = database
+                .execute(ListActiveSnapshotKeys {
+                    source_module_id: module_id,
+                })
+                .await
                 .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?;
-            snapshots.push(
-                database
-                    .execute(QuerySnapshot::active(key))
-                    .await
-                    .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?,
-            );
+            for key in keys {
+                snapshots.push(
+                    database
+                        .execute(QuerySnapshot::active(key))
+                        .await
+                        .map_err(|error| {
+                            command_error("snapshot_query_failed", &error.to_string())
+                        })?,
+                );
+            }
         }
     }
     let mut weight_observations = Vec::new();
+    let mut nutrition_items = Vec::new();
+    let mut activity_days = Vec::new();
+    let mut activity_events = Vec::new();
+    let mut heart_rate_observations = Vec::new();
+    let mut workout_sessions = Vec::new();
+    let mut exercise_sets = Vec::new();
     let mut observed_dates = BTreeSet::new();
     let mut counts = BTreeMap::new();
     for snapshot in &snapshots {
@@ -806,26 +828,32 @@ async fn dashboard_input(
                 }
                 CanonicalObservation::NutritionItem(value) => {
                     observed_dates.insert(value.local_date);
+                    nutrition_items.push(value);
                     *counts.entry("nutrition.items").or_insert(0) += 1;
                 }
                 CanonicalObservation::ActivityDay(value) => {
                     observed_dates.insert(value.local_date);
+                    activity_days.push(value);
                     *counts.entry("activity.days").or_insert(0) += 1;
                 }
                 CanonicalObservation::ActivityEvent(value) => {
                     observed_dates.insert(value.local_date);
+                    activity_events.push(value);
                     *counts.entry("activity.events").or_insert(0) += 1;
                 }
                 CanonicalObservation::HeartRate(value) => {
                     observed_dates.insert(value.observed_local_at.0.date().into());
+                    heart_rate_observations.push(value);
                     *counts.entry("heart_rate.observations").or_insert(0) += 1;
                 }
                 CanonicalObservation::WorkoutSession(value) => {
                     observed_dates.insert(value.started_local_at.0.date().into());
-                    *counts.entry("workouts.sessions").or_insert(0) += 1;
+                    workout_sessions.push(value);
+                    *counts.entry("strength.sessions").or_insert(0) += 1;
                 }
-                CanonicalObservation::ExerciseSet(_value) => {
-                    *counts.entry("workouts.sets").or_insert(0) += 1;
+                CanonicalObservation::ExerciseSet(value) => {
+                    exercise_sets.push(value);
+                    *counts.entry("strength.sets").or_insert(0) += 1;
                 }
                 CanonicalObservation::PhaseEvent(value) => {
                     observed_dates.insert(value.start_date);
@@ -833,17 +861,119 @@ async fn dashboard_input(
             }
         }
     }
+    let phase_events = if let Some(database) = database.as_ref() {
+        database
+            .execute(ListPhaseEvents)
+            .await
+            .map_err(|error| command_error("phase_event_query_failed", &error.to_string()))?
+    } else {
+        Vec::new()
+    };
+    let snapshot_refs = snapshots
+        .iter()
+        .filter_map(|snapshot| {
+            snapshot
+                .snapshot_id
+                .map(|snapshot_id| mfa_analytics::SnapshotRef {
+                    logical_snapshot_key: snapshot.logical_snapshot_key.clone(),
+                    snapshot_id: snapshot_id.to_string(),
+                })
+        })
+        .collect();
     let context = MetricContext {
         requested: *requested,
         as_of: requested.end,
-        snapshot_refs: Vec::new(),
+        snapshot_refs,
         algorithm_version: mfa_analytics::AlgorithmVersion::new("base-analytics-v1"),
     };
     let weight = weight_analytics(&context, &weight_observations);
+    let nutrition = nutrition_analytics(
+        &context,
+        &nutrition_items,
+        &excluded_dates(*requested, &phase_events),
+    );
+    let activity = activity_analytics(
+        &context,
+        &activity_days,
+        &activity_events,
+        &heart_rate_observations,
+    );
+    let strength = strength_analytics(&context, &workout_sessions, &exercise_sets);
+    let tdee = rolling_tdee(
+        *requested,
+        &nutrition.days,
+        &weight.daily_median,
+        &phase_events,
+    );
     let weight_value = json!({
+        "observations": weight.observations,
         "dailyMedianKg": weight.daily_median,
         "trailing7dMeanKg": weight.trailing_7d_mean,
         "slope28d": weight.slope_28d,
+        "phaseEvents": phase_events.clone(),
+    });
+    let nutrition_value = json!({
+        "days": nutrition.days,
+        "trailing7dMeanCalories": nutrition.trailing_7d_mean_calories,
+        "phaseEvents": phase_events,
+        "tdee": match tdee {
+            mfa_analytics::TdeeResult::Ready(estimate) => {
+                json!({"state": "ready", "estimate": estimate})
+            }
+            mfa_analytics::TdeeResult::InsufficientCoverage(coverage) => {
+                json!({"state": "insufficient_coverage", "coverage": coverage})
+            }
+        },
+    });
+    let activity_value = json!({
+        "steps": activity
+            .steps
+            .iter()
+            .filter(|point| point.value.is_some())
+            .cloned()
+            .collect::<Vec<_>>(),
+        "mean_steps_7d": activity
+            .mean_steps_7d
+            .iter()
+            .filter(|point| point.value.is_some())
+            .cloned()
+            .collect::<Vec<_>>(),
+        "mean_steps_28d": activity
+            .mean_steps_28d
+            .iter()
+            .filter(|point| point.value.is_some())
+            .cloned()
+            .collect::<Vec<_>>(),
+        "events": activity
+            .events
+            .iter()
+            .filter(|event| {
+                event.accepted_event_count > 0
+                    || event.unknown_event_count > 0
+                    || event.duration_seconds.is_some()
+                    || event.distance_km.is_some()
+                    || event.estimated_calories_kcal.is_some()
+            })
+            .cloned()
+            .collect::<Vec<_>>(),
+        "heart_rate": activity
+            .heart_rate
+            .iter()
+            .filter(|point| point.value.is_some())
+            .cloned()
+            .collect::<Vec<_>>(),
+        "water": activity
+            .water
+            .iter()
+            .filter(|point| point.value.is_some())
+            .cloned()
+            .collect::<Vec<_>>(),
+    });
+    let strength_value = json!({
+        "session_counts": strength.session_counts,
+        "session_durations": strength.session_durations,
+        "working_sets": strength.working_sets,
+        "weekly_best_e1rm": strength.weekly_best_e1rm,
     });
     let observed_days = observed_dates
         .iter()
@@ -854,16 +984,24 @@ async fn dashboard_input(
         let name = requirement.capability.to_string();
         capabilities.insert(
             requirement.capability.clone(),
-            if name == "body.weight" {
-                weight_value.clone()
-            } else {
-                json!({
+            match name.as_str() {
+                "body.weight" => weight_value.clone(),
+                "nutrition.items" => nutrition_value.clone(),
+                "activity.days" | "activity.events" => activity_value.clone(),
+                "heart_rate.observations" => json!(activity.heart_rate),
+                "strength.sessions" | "strength.sets" => strength_value.clone(),
+                _ => json!({
                     "recordCount": counts.get(name.as_str()).copied().unwrap_or_default(),
                     "observedDays": observed_days,
-                })
+                }),
             },
         );
     }
+    capabilities.insert(
+        CapabilityId::try_from("heart_rate.observations")
+            .map_err(|error| command_error("invalid_capability", &error.to_string()))?,
+        json!(activity.heart_rate),
+    );
     capabilities.insert(
         CapabilityId::try_from("dashboard.page")
             .map_err(|error| command_error("invalid_dashboard_page", &error.to_string()))?,
@@ -927,12 +1065,16 @@ fn base_localization_keys() -> BTreeSet<String> {
         "body.raw_weight",
         "body.daily_median",
         "body.trailing_mean",
+        "body.phase_overlay",
         "body.slope",
         "body.trend",
         "body.missing",
         "body.ready",
         "nutrition.title",
         "nutrition.calories",
+        "nutrition.macros",
+        "nutrition.trailing_mean",
+        "nutrition.tdee",
         "nutrition.protein",
         "nutrition.fiber",
         "nutrition.quality",
@@ -941,23 +1083,27 @@ fn base_localization_keys() -> BTreeSet<String> {
         "nutrition.ready",
         "activity.title",
         "activity.steps",
+        "activity.events",
         "activity.duration",
         "activity.distance",
         "activity.heart_rate",
+        "activity.water",
         "activity.trend",
         "activity.missing",
         "activity.ready",
         "strength.title",
         "strength.sessions",
+        "strength.duration",
         "strength.sets",
         "strength.e1rm",
-        "strength.duration",
         "strength.trend",
         "strength.missing",
         "strength.ready",
         "sources.title",
+        "sources.modules",
         "sources.providers",
         "sources.coverage",
+        "sources.snapshots",
         "sources.quality",
         "sources.ready",
         "sources.missing",

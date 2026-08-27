@@ -4,9 +4,20 @@ MyFitAnalytics is a local-first, private workspace for personal fitness analytic
 
 ## Status
 
-The foundation is implemented and buildable. It includes the Rust workspace, shared versioned contracts, module package validation and installation, Storage/Ingestion, bundled Hevy and MyNetDiary source modules, a sandboxed Wasm component host, capability/provider resolution, locale fallback, and a typed Tauri-to-Svelte shell.
+Plan 4 (analytics and dashboard UI) is implemented through its non-foreground
+production-path gate. The repository includes the Rust workspace, shared
+versioned contracts, module package validation and installation,
+Storage/Ingestion, bundled Hevy and MyNetDiary source modules, deterministic
+base analytics, a sandboxed Wasm component host, capability/provider
+resolution, locale fallback, and a typed Tauri-to-Svelte dashboard shell.
 
-Storage/Ingestion and the bundled Hevy/MyNetDiary source modules are implemented. The analytics and dashboard UI, tray/background product behavior, and release distribution remain incomplete and are future work. Local macOS `.app` and DMG bundles are development-validation artifacts with ad hoc signing; strict signature and entitlement verification is performed, but no notarization or publishing is claimed.
+Task 7's automated gate uses only checked-in synthetic MyNetDiary and Hevy
+fixtures, isolated temporary roots, and the application command services. It
+does not claim the later packaged native macOS acceptance required by Plan 4;
+that acceptance remains deferred to the manager-owned follow-up. Plan 5
+(desktop lifecycle, tray/background behavior, and release packaging) remains
+deferred. Local macOS `.app` and DMG bundles, when built, are development
+validation artifacts; no notarization or publishing is claimed.
 
 ## Architecture
 
@@ -67,6 +78,12 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Run the non-foreground production-path dashboard gate:
+
+```bash
+bash scripts/run-dashboard-gate.sh
+```
+
 Run the frontend tests, type checks, and production build:
 
 ```bash
@@ -90,6 +107,7 @@ The root shortcuts `pnpm run test`, `pnpm run check`, and `pnpm run build` deleg
 - [Storage and ingestion plan](docs/superpowers/plans/2026-08-25-myfitanalytics-storage-ingestion.md)
 - [Source modules plan](docs/superpowers/plans/2026-08-25-myfitanalytics-source-modules.md)
 - [Analytics and dashboard UI plan](docs/superpowers/plans/2026-08-25-myfitanalytics-analytics-ui.md)
+- [Dashboard module authoring](docs/dashboard-module-authoring.md)
 - [Desktop lifecycle and release plan](docs/superpowers/plans/2026-08-25-myfitanalytics-desktop-release.md)
 
 ## License

@@ -3,7 +3,7 @@ use mfa_db::DatabaseService;
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn fresh_database_reaches_schema_version_three_and_restart_is_idempotent() {
+async fn fresh_database_reaches_schema_version_four_and_restart_is_idempotent() {
     let root = TempDir::new().unwrap();
     let path = root.path().join("storage.duckdb");
     let service = DatabaseService::start(&path, 4).await.unwrap();
@@ -13,7 +13,7 @@ async fn fresh_database_reaches_schema_version_three_and_restart_is_idempotent()
             .await
             .unwrap()
             .schema_version,
-        3
+        4
     );
     service.shutdown().await.unwrap();
 
@@ -24,9 +24,31 @@ async fn fresh_database_reaches_schema_version_three_and_restart_is_idempotent()
             .await
             .unwrap()
             .schema_version,
-        3
+        4
     );
     restarted.shutdown().await.unwrap();
+
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT name FROM schema_migration WHERE version = 4",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "user_phase_events"
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'user_phase_event'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]

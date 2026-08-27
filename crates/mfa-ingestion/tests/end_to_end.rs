@@ -214,7 +214,7 @@ async fn exact_duplicate_records_receipt_removes_inbox_and_skips_guest() {
     assert_eq!(coordinator.runtime_invocations(), first_count);
     assert!(coordinator.duplicate_receipts() >= 1);
     let health = database.execute(HealthCheck).await.unwrap();
-    assert_eq!(health.schema_version, 3);
+    assert_eq!(health.schema_version, 4);
     database.shutdown().await.unwrap();
     coordinator.shutdown().await.unwrap();
 }

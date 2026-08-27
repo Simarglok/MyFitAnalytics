@@ -1,7 +1,7 @@
 use crate::error::DatabaseError;
 use crate::provenance::{
     DataQualityItem, ExtensionContractRegistration, ExtensionContractRegistrationResult,
-    SnapshotCommitResult, ValidatedSnapshotBatch,
+    LogicalSnapshotKey, SnapshotCommitResult, ValidatedSnapshotBatch,
 };
 pub use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewResponse};
 use mfa_contracts::{ModuleId, PhaseEvent, UtcInstant};
@@ -93,6 +93,11 @@ pub struct QueryAttemptResult {
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub record_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListActiveSnapshotKeys {
+    pub source_module_id: ModuleId,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +243,10 @@ pub enum DatabaseCommand {
     QuerySnapshot(
         QuerySnapshot,
         oneshot::Sender<Result<SnapshotResponse, DatabaseError>>,
+    ),
+    ListActiveSnapshotKeys(
+        ListActiveSnapshotKeys,
+        oneshot::Sender<Result<Vec<LogicalSnapshotKey>, DatabaseError>>,
     ),
     CommitSnapshot(
         CommitSnapshot,
@@ -398,6 +407,15 @@ impl IntoDatabaseCommand<SnapshotResponse> for QuerySnapshot {
         response: oneshot::Sender<Result<SnapshotResponse, DatabaseError>>,
     ) -> DatabaseCommand {
         DatabaseCommand::QuerySnapshot(self, response)
+    }
+}
+
+impl IntoDatabaseCommand<Vec<LogicalSnapshotKey>> for ListActiveSnapshotKeys {
+    fn into_database_command(
+        self,
+        response: oneshot::Sender<Result<Vec<LogicalSnapshotKey>, DatabaseError>>,
+    ) -> DatabaseCommand {
+        DatabaseCommand::ListActiveSnapshotKeys(self, response)
     }
 }
 

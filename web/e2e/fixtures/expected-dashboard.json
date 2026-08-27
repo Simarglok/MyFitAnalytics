@@ -1,0 +1,150 @@
+{
+  "dateRange": {
+    "start": "2026-01-01",
+    "end": "2026-02-28"
+  },
+  "navigationPageIds": [
+    "overview",
+    "body",
+    "nutrition",
+    "activity",
+    "strength",
+    "sources"
+  ],
+  "pages": {
+    "overview": {
+      "titleKey": "base.overview.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "overview.body_weight",
+        "overview.nutrition",
+        "overview.trend",
+        "overview.quality"
+      ]
+    },
+    "body": {
+      "titleKey": "base.body.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "body.raw_weight",
+        "body.daily_median",
+        "body.trailing_mean",
+        "body.phase_overlay",
+        "body.weight.trend",
+        "body.status"
+      ]
+    },
+    "nutrition": {
+      "titleKey": "base.nutrition.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "nutrition.calories",
+        "nutrition.macros",
+        "nutrition.trailing_mean",
+        "nutrition.tdee",
+        "nutrition.calorie.trend",
+        "nutrition.status"
+      ]
+    },
+    "activity": {
+      "titleKey": "base.activity.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "activity.steps",
+        "activity.events",
+        "activity.heart_rate",
+        "activity.water",
+        "activity.steps.trend",
+        "activity.status"
+      ]
+    },
+    "strength": {
+      "titleKey": "base.strength.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "strength.sessions",
+        "strength.duration",
+        "strength.sets",
+        "strength.e1rm",
+        "strength.sessions.calendar",
+        "strength.status"
+      ]
+    },
+    "sources": {
+      "titleKey": "base.sources.title",
+      "availabilityState": "insufficient_coverage",
+      "requiredBlockKeys": [
+        "sources.modules",
+        "sources.providers",
+        "sources.snapshots",
+        "sources.quality",
+        "sources.status"
+      ]
+    }
+  },
+  "analytics": {
+    "body": {
+      "weightsKg": [81.4, 81.1],
+      "dailyMediansKg": [81.4, 81.1],
+      "trailing7dMeanKgAtLastObservedDate": 81.25,
+      "slope28dPerDay": -0.3
+    },
+    "nutrition": {
+      "itemCount": 2,
+      "completeDays": 1,
+      "partialDays": 0,
+      "missingDays": 58,
+      "trailing7dMeanCaloriesAtLastCompleteDay": 640.0
+    },
+    "activity": {
+      "steps": 6400,
+      "acceptedEventCount": 1,
+      "durationSeconds": 1800,
+      "distanceKm": 2.4,
+      "estimatedCaloriesKcal": 140.0,
+      "unknownEventCount": 0,
+      "heartRateBpm": 128.0,
+      "waterMl": 500.0,
+      "meanSteps7dAtLastObservedDate": 6400.0,
+      "meanSteps28dAtLastObservedDate": 6400.0,
+      "observedDate": "2026-01-04"
+    },
+    "strength": {
+      "sessions7d": 0,
+      "sessions14d": 0,
+      "sessions28d": 1,
+      "workingSets": 3,
+      "weeklyBestE1rmKg": 76.0
+    },
+    "tdee": {
+      "state": "insufficient_coverage",
+      "completeNutritionDays": 1,
+      "weightDays": 2,
+      "first7dWeightDays": 0,
+      "last7dWeightDays": 0,
+      "slopeAvailable": true,
+      "excludedDaysBeforePhase": 0,
+      "excludedDaysAfterPhase": 2
+    }
+  },
+  "availabilityStates": [
+    "disabled_by_user",
+    "missing_dependency",
+    "incompatible_contract",
+    "missing_capability",
+    "waiting_for_data",
+    "insufficient_coverage",
+    "ready"
+  ],
+  "providerSelection": {
+    "capability": "body.weight",
+    "moduleId": "hevy"
+  },
+  "phaseEvent": {
+    "eventType": "cut",
+    "startDate": "2026-01-15",
+    "endDate": "2026-01-16",
+    "description": "synthetic phase",
+    "excludeFromTdee": true
+  }
+}
