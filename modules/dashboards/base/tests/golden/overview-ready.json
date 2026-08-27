@@ -29,8 +29,26 @@
         "value": {
           "available": true,
           "value": {
-            "calories": 2400,
-            "complete_days": 28
+            "days": [
+              {
+                "calories_kcal": 2400.0,
+                "local_date": "2026-01-01",
+                "logged_item_count": 2,
+                "quality": "complete"
+              }
+            ],
+            "tdee": {
+              "coverage": {
+                "complete_nutrition_days": 1
+              },
+              "state": "insufficient_coverage"
+            },
+            "trailing7dMeanCalories": [
+              {
+                "local_date": "2026-01-01",
+                "value": 2400.0
+              }
+            ]
           }
         }
       }

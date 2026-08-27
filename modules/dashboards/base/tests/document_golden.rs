@@ -23,10 +23,29 @@ fn ready_input() -> DashboardInput {
             (capability("body.fat_percentage"), json!({"value": 18.0})),
             (
                 capability("nutrition.items"),
-                json!({"calories": 2_400, "complete_days": 28}),
+                json!({
+                    "days": [{
+                        "local_date": "2026-01-01",
+                        "calories_kcal": 2_400.0,
+                        "quality": "complete",
+                        "logged_item_count": 2
+                    }],
+                    "trailing7dMeanCalories": [{
+                        "local_date": "2026-01-01",
+                        "value": 2_400.0
+                    }],
+                    "tdee": {
+                        "state": "insufficient_coverage",
+                        "coverage": {"complete_nutrition_days": 1}
+                    }
+                }),
             ),
             (
                 capability("activity.days"),
+                json!({"steps": 9_000, "accepted_events": 2}),
+            ),
+            (
+                capability("activity.events"),
                 json!({"steps": 9_000, "accepted_events": 2}),
             ),
             (capability("strength.sessions"), json!({"sessions": 4})),

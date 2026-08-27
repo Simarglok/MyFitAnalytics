@@ -157,18 +157,59 @@ were run against checked-in synthetic fixtures and packaged components only:
 | DashboardBlock wrapper unknown fields | Validator RED: a wrapper-level `onClick` field was accepted. | Dashboard-host focused validator regression exited `0`; wrapper fields are rejected before document deserialization. |
 
 The final correction-round-2 gate was run with `bash scripts/run-dashboard-gate.sh`
-after the scoped fixture/contract updates. Package builds and all page queries
-completed, but the gate remains RED at
-`crates/mfa-integration-tests/tests/dashboard_gate.rs` TDEE coverage: field
-`complete_nutrition_days` was `0` while the checked-in expectation is `1`.
-This fixture/semantic discrepancy is intentionally recorded for manager
-verification and is not represented as a green result here.
+after the scoped fixture/contract updates. It reached the TDEE coverage
+assertion with the stale expectation (`complete_nutrition_days`: actual `0`,
+expected `1`); correction round 3 updated that fixture expectation to the exact
+February window semantics recorded below.
 
 Focused Rust suites already run in this correction round include
 `cargo test -p mfa-analytics` (exit `0`), the dashboard-base focused suite
 (body-fat regression exit `0`), the dashboard-host wrapper regression (exit
 `0`), and the packaged gate invocations described above. No native foreground
 acceptance, production app launch, Plan 5 work, or remote mutation was done.
+
+## Correction round 3 evidence — final allowed round
+
+Terra confirmed three stale test/golden fixtures. No product logic was changed
+in this round. RED evidence was captured before the fixture edits:
+
+| Boundary | RED result |
+| --- | --- |
+| Packaged base runtime fixture | `cargo test -p mfa-module-host --test base_dashboard` — exit `101`; `missing_capability_input: missing capability activity.events`. |
+| Base dashboard document goldens | `cargo test -p mfa-dashboard-base --test document_golden` — exit `101`; shared ready input/golden still expected the old nutrition object shape. |
+| Production gate | Prior round’s exact-window TDEE expectation was stale: February 1–28 contains the two February weights, no January 4 nutrition day, and no January 15–16 phase dates. |
+
+The minimal GREEN corrections were:
+
+- added the declared `activity.events` input to the packaged component fixture;
+- updated the shared dashboard ready input and its dependent overview,
+  nutrition, and sources goldens to distinct `days`, trailing-mean, and TDEE
+  fields;
+- updated all affected exact-window TDEE expectations consistently: zero
+  complete nutrition days, two weight days, two first-seven-day weight days,
+  zero last-seven-day weight days, slope available, and zero pre/post phase
+  exclusions.
+
+Fresh final results:
+
+```text
+cargo test -p mfa-module-host --test base_dashboard
+test result: ok. 2 passed; 0 failed
+
+cargo test -p mfa-dashboard-base --test document_golden
+test result: ok. 6 passed; 0 failed
+
+bash scripts/run-dashboard-gate.sh
+test production_dashboard_gate_imports_fixtures_and_queries_every_base_page ... ok
+test result: ok. 1 passed; 0 failed
+
+cargo fmt --all --check                         # exit 0
+git diff --check                                # exit 0
+```
+
+Round 3 touched only test/golden fixtures and this evidence file; it did not
+launch the native app, access a user profile, run Plan 5 work, or mutate a
+remote.
 
 ## Safety and truthfulness boundary
 

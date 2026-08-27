@@ -119,13 +119,13 @@
     },
     "tdee": {
       "state": "insufficient_coverage",
-      "completeNutritionDays": 1,
+      "completeNutritionDays": 0,
       "weightDays": 2,
-      "first7dWeightDays": 0,
+      "first7dWeightDays": 2,
       "last7dWeightDays": 0,
       "slopeAvailable": true,
       "excludedDaysBeforePhase": 0,
-      "excludedDaysAfterPhase": 2
+      "excludedDaysAfterPhase": 0
     }
   },
   "availabilityStates": [
