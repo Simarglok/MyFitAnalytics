@@ -2720,6 +2720,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-analytics"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mfa-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "mfa-archive"
 version = "0.1.0"
 dependencies = [
