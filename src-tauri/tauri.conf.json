@@ -27,7 +27,8 @@
   "bundle": {
     "active": true,
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
     },
     "resources": {
       "../dist/modules/mynetdiary.mfasource": "modules/mynetdiary.mfasource",
