@@ -124,6 +124,33 @@ async fn one_scan_failure_does_not_stop_later_scan_jobs() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_finishes_a_queued_scan_before_stopping() {
+    let executor = BlockingExecutor {
+        runs: Arc::new(AtomicUsize::new(0)),
+        started: Arc::new(Notify::new()),
+        release: Arc::new(Notify::new()),
+    };
+    let queue = ScanQueue::start(executor.clone(), 2);
+
+    let first_queue = queue.clone();
+    let first = tokio::spawn(async move { first_queue.request_scan(request()).await });
+    executor.started.notified().await;
+
+    let second_queue = queue.clone();
+    let second = tokio::spawn(async move { second_queue.request_scan(request()).await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let shutdown_queue = queue.clone();
+    let shutdown = tokio::spawn(async move { shutdown_queue.shutdown().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    executor.release.notify_one();
+    assert!(first.await.unwrap().is_ok());
+    assert!(second.await.unwrap().is_ok());
+    assert!(shutdown.await.unwrap().is_ok());
+    assert_eq!(executor.runs.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn periodic_scans_stop_after_queue_shutdown() {
     let executor = CountingExecutor {
         runs: Arc::new(AtomicUsize::new(0)),

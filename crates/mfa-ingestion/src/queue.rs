@@ -161,6 +161,7 @@ where
 {
     // Requests that arrived while the previous job was active are drained here,
     // producing one follow-up scan instead of one job per trigger.
+    let mut shutdown_response = None;
     while let Ok(command) = receiver.try_recv() {
         match command {
             QueueCommand::Scan { request, response } => {
@@ -175,11 +176,8 @@ where
                 }
             }
             QueueCommand::Shutdown(response) => {
-                let _ = response.send(Ok(()));
-                for waiter in pending.responses {
-                    let _ = waiter.send(Err(IngestionError::QueueClosed));
-                }
-                return true;
+                shutdown_response = Some(response);
+                break;
             }
         }
     }
@@ -191,7 +189,12 @@ where
     for waiter in pending.responses {
         let _ = waiter.send(response.clone());
     }
-    false
+    if let Some(response) = shutdown_response {
+        let _ = response.send(Ok(()));
+        true
+    } else {
+        false
+    }
 }
 
 pub fn now_request(reason: ScanReason) -> ScanRequest {
