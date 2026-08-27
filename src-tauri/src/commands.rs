@@ -1,11 +1,24 @@
 use crate::dialogs::{DialogPort, NativeDialogPort};
 use crate::state::{AppState, AppStateError};
-use mfa_contracts::{CapabilityId, ModuleId, ModuleManifest, ModuleType};
-use mfa_db::{HealthCheck, ListQualityItems};
+use crate::view_models::{
+    AvailabilityView, CoverageView, DashboardPageView, DateRangeView, FreshnessView,
+    NavigationItemView, NavigationView, PhaseEventInput, PhaseEventView, ProviderView,
+};
+use chrono::Utc;
+use mfa_analytics::{DateRange, MetricContext, WeightObservation, weight_analytics};
+use mfa_contracts::{
+    AvailabilityState, CanonicalObservation, CapabilityId, DashboardInput, ModuleId,
+    ModuleManifest, ModuleType, PhaseEvent,
+};
+use mfa_db::{
+    CreatePhaseEvent, DeletePhaseEvent, HealthCheck, ListPhaseEvents, ListQualityItems,
+    LogicalSnapshotKey, QuerySnapshot, UpdatePhaseEvent,
+};
 use mfa_ingestion::{HealthSnapshot, HealthState, IngestionCoordinator, RecoveryMode, now_request};
-use mfa_module_host::{InstalledModule, PackageInstaller, UninstallTransaction};
+use mfa_module_host::{ComponentRuntime, InstalledModule, PackageInstaller, UninstallTransaction};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use serde_json::json;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
@@ -495,6 +508,465 @@ pub struct ProviderSelectionView {
     pub active_providers: BTreeMap<String, String>,
 }
 
+const BASE_DASHBOARD_PAGES: [(&str, &str); 6] = [
+    ("overview", "base.overview.title"),
+    ("body", "base.body.title"),
+    ("nutrition", "base.nutrition.title"),
+    ("activity", "base.activity.title"),
+    ("strength", "base.strength.title"),
+    ("sources", "base.sources.title"),
+];
+
+pub async fn get_navigation_inner(state: &AppState) -> Result<NavigationView, CommandError> {
+    let items = BASE_DASHBOARD_PAGES
+        .into_iter()
+        .map(|(page_id, title_key)| NavigationItemView {
+            id: format!("base:{page_id}"),
+            page_id: page_id.to_owned(),
+            title_key: title_key.to_owned(),
+            module_id: "base".to_owned(),
+            availability: dashboard_availability(state, "base", 0, 1),
+        })
+        .collect();
+    Ok(NavigationView { items })
+}
+
+pub async fn get_dashboard_inner(
+    module_id: String,
+    page_id: String,
+    range: DateRangeView,
+    state: &AppState,
+) -> Result<DashboardPageView, CommandError> {
+    let module_id = parse_module_id(&module_id)?;
+    let (start, end) = range
+        .parse()
+        .map_err(|detail| command_error("invalid_date_range", &detail))?;
+    if !BASE_DASHBOARD_PAGES
+        .iter()
+        .any(|(page, _)| *page == page_id)
+    {
+        return Err(command_error(
+            "invalid_dashboard_page",
+            "the dashboard page is not available",
+        ));
+    }
+    let module = state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id == module_id && module.module_type == ModuleType::Dashboard)
+        .ok_or_else(|| {
+            command_error(
+                "dashboard_not_found",
+                "the dashboard module is not installed",
+            )
+        })?;
+    if !module.enabled {
+        return Err(command_error(
+            "dashboard_disabled",
+            "the dashboard module is disabled",
+        ));
+    }
+    let manifest = match &module.manifest {
+        ModuleManifest::Dashboard(manifest) => manifest,
+        _ => {
+            return Err(command_error(
+                "dashboard_not_found",
+                "the dashboard module is not installed",
+            ));
+        }
+    };
+    let requested = DateRange { start, end };
+    let (input, observed_days, latest_observation_date) = dashboard_input(
+        state,
+        &requested,
+        page_id.as_str(),
+        &manifest.required_capabilities,
+    )
+    .await?;
+    let document = ComponentRuntime::default()
+        .invoke_dashboard(
+            &module,
+            input.clone(),
+            mfa_module_host::RuntimeLimits::default(),
+        )
+        .await
+        .map_err(|error| {
+            command_error(
+                error.code(),
+                "the dashboard module could not render this page",
+            )
+        })?;
+    let localization_keys = base_localization_keys();
+    mfa_dashboard_host::validate_document(&document, &input, &localization_keys)
+        .map_err(|error| command_error(error.code(), "the dashboard document was rejected"))?;
+    let expected_days = requested.len_days();
+    Ok(DashboardPageView {
+        module_id: module_id.to_string(),
+        page_id,
+        title_key: document.title_key.clone(),
+        document,
+        availability: dashboard_availability(state, "base", observed_days, expected_days),
+        coverage: CoverageView {
+            expected_days,
+            observed_days,
+            ratio: if expected_days == 0 {
+                0.0
+            } else {
+                observed_days as f64 / expected_days as f64
+            },
+            sufficient: observed_days.saturating_mul(2) >= expected_days,
+        },
+        freshness: FreshnessView {
+            latest_observation_date: latest_observation_date.map(|date| date.to_string()),
+            generated_at: Utc::now().to_rfc3339(),
+        },
+    })
+}
+
+pub async fn select_provider_inner(
+    capability: String,
+    module_id: String,
+    state: &AppState,
+) -> Result<ProviderView, CommandError> {
+    let capability_id = CapabilityId::try_from(capability.clone())
+        .map_err(|error| command_error("invalid_capability", &error.to_string()))?;
+    let module_id = parse_module_id(&module_id)?;
+    let resolution = state
+        .select_provider(capability_id, module_id.clone())
+        .map_err(CommandError::from)?;
+    Ok(ProviderView {
+        capability,
+        module_id: module_id.to_string(),
+        active_providers: resolution
+            .active_providers
+            .into_iter()
+            .map(|(capability, module)| (capability.to_string(), module.to_string()))
+            .collect(),
+    })
+}
+
+pub async fn save_phase_event_inner(
+    input: PhaseEventInput,
+    state: &AppState,
+) -> Result<PhaseEventView, CommandError> {
+    if input.event_type.trim().is_empty() {
+        return Err(command_error(
+            "invalid_phase_event",
+            "phase event type is required",
+        ));
+    }
+    let start_date: mfa_contracts::LocalDate = input
+        .start_date
+        .parse::<mfa_contracts::LocalDate>()
+        .map_err(|error| command_error("invalid_phase_event", &error.to_string()))?;
+    let end_date: mfa_contracts::LocalDate = input
+        .end_date
+        .parse::<mfa_contracts::LocalDate>()
+        .map_err(|error| command_error("invalid_phase_event", &error.to_string()))?;
+    if start_date > end_date {
+        return Err(command_error(
+            "invalid_phase_event",
+            "phase event start must not be after end",
+        ));
+    }
+    let phase_event_id = input
+        .phase_event_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|error| command_error("invalid_phase_event", &error.to_string()))?
+        .unwrap_or_else(Uuid::new_v4);
+    let event = PhaseEvent {
+        phase_event_id,
+        event_type: input.event_type,
+        start_date,
+        end_date,
+        description: input.description,
+        exclude_from_tdee: input.exclude_from_tdee,
+    };
+    let database = state
+        .storage_lock()
+        .map_err(CommandError::from)?
+        .as_ref()
+        .map(|storage| storage.database.clone())
+        .ok_or_else(|| {
+            command_error(
+                "workspace_required",
+                "configure a workspace before editing phase events",
+            )
+        })?;
+    let saved = if input.phase_event_id.is_some() {
+        database
+            .execute(UpdatePhaseEvent { phase_event: event })
+            .await
+    } else {
+        database
+            .execute(CreatePhaseEvent { phase_event: event })
+            .await
+    }
+    .map_err(|error| command_error("phase_event_save_failed", &error.to_string()))?;
+    Ok(saved.into())
+}
+
+pub async fn list_phase_events_inner(
+    state: &AppState,
+) -> Result<Vec<PhaseEventView>, CommandError> {
+    let database = state
+        .storage_lock()
+        .map_err(CommandError::from)?
+        .as_ref()
+        .map(|storage| storage.database.clone())
+        .ok_or_else(|| {
+            command_error(
+                "workspace_required",
+                "configure a workspace before reading phase events",
+            )
+        })?;
+    database
+        .execute(ListPhaseEvents)
+        .await
+        .map(|events| events.into_iter().map(Into::into).collect())
+        .map_err(|error| command_error("phase_event_query_failed", &error.to_string()))
+}
+
+pub async fn delete_phase_event_inner(
+    phase_event_id: String,
+    state: &AppState,
+) -> Result<(), CommandError> {
+    let phase_event_id = Uuid::parse_str(&phase_event_id)
+        .map_err(|error| command_error("invalid_phase_event", &error.to_string()))?;
+    let database = state
+        .storage_lock()
+        .map_err(CommandError::from)?
+        .as_ref()
+        .map(|storage| storage.database.clone())
+        .ok_or_else(|| {
+            command_error(
+                "workspace_required",
+                "configure a workspace before editing phase events",
+            )
+        })?;
+    let deleted = database
+        .execute(DeletePhaseEvent { phase_event_id })
+        .await
+        .map_err(|error| command_error("phase_event_delete_failed", &error.to_string()))?;
+    if deleted {
+        Ok(())
+    } else {
+        Err(command_error(
+            "phase_event_not_found",
+            "the phase event no longer exists",
+        ))
+    }
+}
+
+async fn dashboard_input(
+    state: &AppState,
+    requested: &DateRange,
+    page_id: &str,
+    requirements: &[mfa_contracts::DashboardRequirement],
+) -> Result<(DashboardInput, u64, Option<mfa_contracts::LocalDate>), CommandError> {
+    let database = state
+        .storage_lock()
+        .map_err(CommandError::from)?
+        .as_ref()
+        .map(|storage| storage.database.clone());
+    let providers = state.providers();
+    let mut snapshots = Vec::new();
+    if let Some(database) = database {
+        for module_id in providers.active_providers.values() {
+            let key = LogicalSnapshotKey::new(module_id.to_string())
+                .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?;
+            snapshots.push(
+                database
+                    .execute(QuerySnapshot::active(key))
+                    .await
+                    .map_err(|error| command_error("snapshot_query_failed", &error.to_string()))?,
+            );
+        }
+    }
+    let mut weight_observations = Vec::new();
+    let mut observed_dates = BTreeSet::new();
+    let mut counts = BTreeMap::new();
+    for snapshot in &snapshots {
+        for record in &snapshot.canonical_records {
+            let Ok(observation) = serde_json::from_value::<CanonicalObservation>(record.clone())
+            else {
+                continue;
+            };
+            match observation {
+                CanonicalObservation::BodyMeasurement(value) => {
+                    observed_dates.insert(value.local_date);
+                    weight_observations.push(WeightObservation {
+                        observation_id: value.body_measurement_id.to_string(),
+                        local_date: value.local_date,
+                        weight_kg: value.weight_kg,
+                    });
+                    *counts.entry("body.weight").or_insert(0u64) += 1;
+                }
+                CanonicalObservation::NutritionItem(value) => {
+                    observed_dates.insert(value.local_date);
+                    *counts.entry("nutrition.items").or_insert(0) += 1;
+                }
+                CanonicalObservation::ActivityDay(value) => {
+                    observed_dates.insert(value.local_date);
+                    *counts.entry("activity.days").or_insert(0) += 1;
+                }
+                CanonicalObservation::ActivityEvent(value) => {
+                    observed_dates.insert(value.local_date);
+                    *counts.entry("activity.events").or_insert(0) += 1;
+                }
+                CanonicalObservation::HeartRate(value) => {
+                    observed_dates.insert(value.observed_local_at.0.date().into());
+                    *counts.entry("heart_rate.observations").or_insert(0) += 1;
+                }
+                CanonicalObservation::WorkoutSession(value) => {
+                    observed_dates.insert(value.started_local_at.0.date().into());
+                    *counts.entry("workouts.sessions").or_insert(0) += 1;
+                }
+                CanonicalObservation::ExerciseSet(_value) => {
+                    *counts.entry("workouts.sets").or_insert(0) += 1;
+                }
+                CanonicalObservation::PhaseEvent(value) => {
+                    observed_dates.insert(value.start_date);
+                }
+            }
+        }
+    }
+    let context = MetricContext {
+        requested: *requested,
+        as_of: requested.end,
+        snapshot_refs: Vec::new(),
+        algorithm_version: mfa_analytics::AlgorithmVersion::new("base-analytics-v1"),
+    };
+    let weight = weight_analytics(&context, &weight_observations);
+    let weight_value = json!({
+        "dailyMedianKg": weight.daily_median,
+        "trailing7dMeanKg": weight.trailing_7d_mean,
+        "slope28d": weight.slope_28d,
+    });
+    let observed_days = observed_dates
+        .iter()
+        .filter(|date| requested.contains(**date))
+        .count() as u64;
+    let mut capabilities = BTreeMap::new();
+    for requirement in requirements {
+        let name = requirement.capability.to_string();
+        capabilities.insert(
+            requirement.capability.clone(),
+            if name == "body.weight" {
+                weight_value.clone()
+            } else {
+                json!({
+                    "recordCount": counts.get(name.as_str()).copied().unwrap_or_default(),
+                    "observedDays": observed_days,
+                })
+            },
+        );
+    }
+    capabilities.insert(
+        CapabilityId::try_from("dashboard.page")
+            .map_err(|error| command_error("invalid_dashboard_page", &error.to_string()))?,
+        json!(page_id),
+    );
+    Ok((
+        DashboardInput {
+            capabilities,
+            extensions: BTreeMap::new(),
+        },
+        observed_days,
+        observed_dates.iter().next_back().copied(),
+    ))
+}
+
+fn dashboard_availability(
+    state: &AppState,
+    module_id: &str,
+    observed_days: u64,
+    expected_days: u64,
+) -> AvailabilityView {
+    let Some(module) = state
+        .modules()
+        .into_iter()
+        .find(|module| module.module_id.as_str() == module_id)
+    else {
+        return AvailabilityView {
+            state: AvailabilityState::MissingDependency,
+            reason_key: "dashboard.module_missing".to_owned(),
+            required_capabilities: Vec::new(),
+            required_dependencies: vec![module_id.to_owned()],
+        };
+    };
+    let state_value = if !module.enabled {
+        AvailabilityState::DisabledByUser
+    } else if observed_days == 0 {
+        AvailabilityState::WaitingForData
+    } else if observed_days.saturating_mul(2) < expected_days {
+        AvailabilityState::InsufficientCoverage
+    } else {
+        AvailabilityState::Ready
+    };
+    AvailabilityView {
+        state: state_value,
+        reason_key: "dashboard.availability".to_owned(),
+        required_capabilities: Vec::new(),
+        required_dependencies: Vec::new(),
+    }
+}
+
+fn base_localization_keys() -> BTreeSet<String> {
+    [
+        "overview.title",
+        "overview.body_weight",
+        "overview.nutrition",
+        "overview.quality",
+        "overview.quality_ready",
+        "overview.quality_missing",
+        "overview.trend",
+        "body.title",
+        "body.raw_weight",
+        "body.daily_median",
+        "body.trailing_mean",
+        "body.slope",
+        "body.trend",
+        "body.missing",
+        "body.ready",
+        "nutrition.title",
+        "nutrition.calories",
+        "nutrition.protein",
+        "nutrition.fiber",
+        "nutrition.quality",
+        "nutrition.trend",
+        "nutrition.missing",
+        "nutrition.ready",
+        "activity.title",
+        "activity.steps",
+        "activity.duration",
+        "activity.distance",
+        "activity.heart_rate",
+        "activity.trend",
+        "activity.missing",
+        "activity.ready",
+        "strength.title",
+        "strength.sessions",
+        "strength.sets",
+        "strength.e1rm",
+        "strength.duration",
+        "strength.trend",
+        "strength.missing",
+        "strength.ready",
+        "sources.title",
+        "sources.providers",
+        "sources.coverage",
+        "sources.quality",
+        "sources.ready",
+        "sources.missing",
+    ]
+    .into_iter()
+    .map(|key| format!("base.{key}"))
+    .collect()
+}
+
 fn rollback_uninstall(
     state: &AppState,
     installer: &PackageInstaller,
@@ -958,6 +1430,40 @@ pub async fn select_module_provider(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProviderSelectionView, CommandError> {
     select_module_provider_inner(&state, capability, module_id).await
+}
+
+#[tauri::command]
+pub async fn get_navigation(
+    state: tauri::State<'_, AppState>,
+) -> Result<NavigationView, CommandError> {
+    get_navigation_inner(&state).await
+}
+
+#[tauri::command]
+pub async fn get_dashboard(
+    module_id: String,
+    page_id: String,
+    range: DateRangeView,
+    state: tauri::State<'_, AppState>,
+) -> Result<DashboardPageView, CommandError> {
+    get_dashboard_inner(module_id, page_id, range, &state).await
+}
+
+#[tauri::command]
+pub async fn select_provider(
+    capability: String,
+    module_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProviderView, CommandError> {
+    select_provider_inner(capability, module_id, &state).await
+}
+
+#[tauri::command]
+pub async fn save_phase_event(
+    input: PhaseEventInput,
+    state: tauri::State<'_, AppState>,
+) -> Result<PhaseEventView, CommandError> {
+    save_phase_event_inner(input, &state).await
 }
 
 #[tauri::command]

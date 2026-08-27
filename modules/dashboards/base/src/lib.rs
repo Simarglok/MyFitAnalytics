@@ -77,6 +77,12 @@ pub fn compose_json(input_json: &str) -> Result<String, String> {
     let page = raw
         .get("page_id")
         .and_then(Value::as_str)
+        .or_else(|| {
+            raw.get("capabilities")
+                .and_then(Value::as_object)
+                .and_then(|capabilities| capabilities.get("dashboard.page"))
+                .and_then(Value::as_str)
+        })
         .unwrap_or("overview");
     let page = BasePage::parse(page).ok_or_else(|| "unknown_page".to_owned())?;
     let input: DashboardInput =

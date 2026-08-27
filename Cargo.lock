@@ -2974,9 +2974,12 @@ dependencies = [
 name = "myfitanalytics"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "mfa-analytics",
  "mfa-archive",
  "mfa-config",
  "mfa-contracts",
+ "mfa-dashboard-host",
  "mfa-db",
  "mfa-ingestion",
  "mfa-module-host",

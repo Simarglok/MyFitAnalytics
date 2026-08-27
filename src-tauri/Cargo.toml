@@ -13,7 +13,10 @@ test-support = ["mfa-module-host/test-support"]
 tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
+chrono.workspace = true
 mfa-archive = { path = "../crates/mfa-archive" }
+mfa-analytics = { path = "../crates/mfa-analytics" }
+mfa-dashboard-host = { path = "../crates/mfa-dashboard-host" }
 mfa-config = { path = "../crates/mfa-config" }
 mfa-contracts = { path = "../crates/mfa-contracts" }
 mfa-db = { path = "../crates/mfa-db" }
