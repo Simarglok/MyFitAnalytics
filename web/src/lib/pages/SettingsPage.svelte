@@ -101,7 +101,9 @@
   }
 
   async function selectProvider(capability: string, moduleId: string): Promise<void> {
-    const selection = await transport.selectModuleProvider?.(capability, moduleId);
+    const selection = transport.selectProvider
+      ? await transport.selectProvider(capability, moduleId)
+      : await transport.selectModuleProvider?.(capability, moduleId);
     if (selection) activeProviders = selection.activeProviders;
   }
 
@@ -149,6 +151,13 @@
       {message('settings.choose_workspace')}
     </button>
   </div>
+
+  <label class="locale-select">
+    {message('settings.locale')}
+    <select aria-label={message('settings.locale')}>
+      <option value="en">{message('settings.locale_english')}</option>
+    </select>
+  </label>
 
   {#if loading}
     <p aria-live="polite">{message('settings.loading')}</p>
@@ -215,7 +224,7 @@
               </button>
             {/if}
 
-            {#each entry.module.providedCapabilities ?? [] as capability}
+            {#each entry.module.providedCapabilities ?? [] as capability (capability)}
               <button type="button" data-action="provider" data-module-id={entry.module.id} on:click={() => void run(() => selectProvider(capability, entry.module.id))}>
                 {message('settings.use_for')} {capability}
               </button>

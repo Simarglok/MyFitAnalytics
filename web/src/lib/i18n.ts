@@ -1,46 +1,5 @@
-const FALLBACK_MESSAGES: Record<string, string> = {
-  'app.title': 'MyFitAnalytics',
-  'app.loading': 'Loading MyFitAnalytics',
-  'app.error': 'Unable to load MyFitAnalytics',
-  'modules.title': 'Installed modules',
-  'settings.eyebrow': 'Settings',
-  'settings.sources': 'Source modules',
-  'settings.install_package': 'Install Module Package...',
-  'settings.workspace': 'Workspace',
-  'settings.workspace_unconfigured': 'Not configured',
-  'settings.choose_workspace': 'Choose Workspace...',
-  'settings.loading': 'Loading module catalog...',
-  'settings.empty': 'No source modules are installed.',
-  'settings.available_version': 'Available version:',
-  'settings.inbox': 'Inbox:',
-  'settings.choose_inbox': 'Choose inbox',
-  'settings.install': 'Install',
-  'settings.update': 'Update',
-  'settings.enable': 'Enable',
-  'settings.disable': 'Disable',
-  'settings.uninstall': 'Uninstall',
-  'settings.use_for': 'Use for',
-  'settings.active_provider': 'Active provider',
-  'settings.state.available': 'Available',
-  'settings.state.enabled': 'Enabled',
-  'settings.state.disabled': 'Disabled',
-  'settings.state.update': 'Update available',
-  'settings.state.error': 'Error',
-  'settings.state.incompatible': 'Incompatible',
-  'settings.group.source': 'Sources',
-  'settings.group.dashboard': 'Dashboards',
-  'settings.group.locale': 'Language',
-  'settings.confirm_uninstall': 'Are you sure you want to uninstall this module?',
-  'settings.confirm': 'Uninstall',
-  'settings.cancel': 'Cancel',
-  'settings.error.workspace_required': 'Configure a workspace before enabling this source.',
-  'settings.error.module_must_be_disabled': 'Disable this module before uninstalling it.',
-  'settings.error.incompatible_app_version': 'This module is not compatible with this app version.',
-  'settings.error.package_io_error': 'The module package could not be read.',
-  'settings.error.module_update_unavailable': 'No update is available for this module.',
-  'settings.error.module_action_failed': 'The module action could not be completed.',
-};
+import { translate } from "./i18n/catalog";
 
-export function message(key: string, fallback = FALLBACK_MESSAGES[key] ?? key): string {
-  return FALLBACK_MESSAGES[key] ?? fallback;
+export function message(key: string, fallback?: string): string {
+  return translate(key, fallback);
 }

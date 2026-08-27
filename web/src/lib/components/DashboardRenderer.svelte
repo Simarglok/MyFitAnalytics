@@ -1,0 +1,197 @@
+<script lang="ts">
+  import AvailabilityPanel from './AvailabilityPanel.svelte';
+  import BarChart from './charts/BarChart.svelte';
+  import CalendarHeatmap from './charts/CalendarHeatmap.svelte';
+  import LineChart from './charts/LineChart.svelte';
+  import ScatterChart from './charts/ScatterChart.svelte';
+  import { message } from '../i18n';
+  import type {
+    AvailabilityView,
+    ChartSeries,
+    DashboardBlock,
+    DashboardChart,
+    DashboardDocument,
+    DashboardTable,
+  } from '../types';
+
+  export let document: unknown;
+  export let availability: AvailabilityView | null = null;
+  export let stale = false;
+
+  type SafeDocument = DashboardDocument;
+
+  function decodeDocument(value: unknown): SafeDocument | null {
+    if (!isRecord(value) || typeof value.titleKey !== 'string' || !Array.isArray(value.blocks)) {
+      return null;
+    }
+    const blocks = value.blocks.map(decodeBlock);
+    return blocks.every((block): block is DashboardBlock => block !== null)
+      ? { titleKey: value.titleKey, blocks }
+      : null;
+  }
+
+  function decodeBlock(value: unknown): DashboardBlock | null {
+    if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.value)) return null;
+    switch (value.type) {
+      case 'card':
+        return typeof value.value.key === 'string' && typeof value.value.label === 'string'
+          ? { type: 'card', value: { key: value.value.key, label: value.value.label, value: value.value.value } }
+          : null;
+      case 'table':
+        return decodeTable(value.value);
+      case 'status_panel':
+        return decodeStatus(value.value);
+      case 'chart':
+        return decodeChart(value.value);
+      default:
+        return null;
+    }
+  }
+
+  function decodeTable(value: Record<string, unknown>): DashboardBlock | null {
+    if (
+      typeof value.key !== 'string' ||
+      !Array.isArray(value.columns) ||
+      !value.columns.every((column) => typeof column === 'string') ||
+      !Array.isArray(value.rows) ||
+      !value.rows.every((row) => Array.isArray(row))
+    ) {
+      return null;
+    }
+    return {
+      type: 'table',
+      value: { key: value.key, columns: value.columns, rows: value.rows as unknown[][] },
+    };
+  }
+
+  function decodeStatus(value: Record<string, unknown>): DashboardBlock | null {
+    if (typeof value.key !== 'string' || typeof value.messageKey !== 'string' || !isRecord(value.state)) {
+      return null;
+    }
+    const state = typeof value.state.state === 'string' ? value.state.state : value.state.type;
+    return typeof state === 'string' && state in availabilityLabels
+      ? {
+          type: 'status_panel',
+          value: {
+            key: value.key,
+            state: {
+              state: state as AvailabilityView['state'],
+              reasonKey: value.messageKey,
+              requiredCapabilities: [],
+              requiredDependencies: [],
+            },
+            messageKey: value.messageKey,
+          },
+        }
+      : null;
+  }
+
+  function decodeChart(value: Record<string, unknown>): DashboardBlock | null {
+    if (
+      typeof value.key !== 'string' ||
+      !isChartType(value.chartType) ||
+      !Array.isArray(value.series)
+    ) {
+      return null;
+    }
+    const series: ChartSeries[] = [];
+    for (const candidate of value.series) {
+      if (!isRecord(candidate) || typeof candidate.name !== 'string' || !Array.isArray(candidate.points)) {
+        return null;
+      }
+      const points: [string, number | null][] = [];
+      for (const point of candidate.points) {
+        if (!Array.isArray(point) || typeof point[0] !== 'string') return null;
+        if (point[1] !== null && (typeof point[1] !== 'number' || !Number.isFinite(point[1]))) return null;
+        points.push([point[0], point[1] as number | null]);
+      }
+      series.push({ name: candidate.name, points });
+    }
+    return { type: 'chart', value: { key: value.key, chartType: value.chartType, series } };
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  function isChartType(value: unknown): value is DashboardChart['chartType'] {
+    return value === 'line' || value === 'bar' || value === 'scatter' || value === 'calendar_heatmap';
+  }
+
+  const availabilityLabels: Record<string, true> = {
+    missing_capability: true,
+    missing_dependency: true,
+    incompatible_contract: true,
+    waiting_for_data: true,
+    insufficient_coverage: true,
+    ready: true,
+    disabled_by_user: true,
+  };
+
+  $: safeDocument = decodeDocument(document);
+
+  function cardValue(value: unknown): string {
+    if (value === null || value === undefined) return message('dashboard.card_empty');
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return message('dashboard.card_empty');
+    }
+  }
+
+  function chartTitle(key: string): string {
+    return message(key, key);
+  }
+</script>
+
+{#if !safeDocument}
+  <section class="panel error" role="alert">
+    <h2>{message('dashboard.content_unavailable')}</h2>
+  </section>
+{:else}
+  <section class="dashboard-document" aria-labelledby="dashboard-document-title">
+    <h2 id="dashboard-document-title">{message(safeDocument.titleKey, safeDocument.titleKey)}</h2>
+    {#if availability}
+      <AvailabilityPanel {availability} />
+    {/if}
+    {#if safeDocument.blocks.length === 0}
+      <p class="muted">{message('dashboard.no_points')}</p>
+    {/if}
+    {#each safeDocument.blocks as block (block.value.key)}
+      {#if block.type === 'card'}
+        <article class="dashboard-card" data-block-type="card">
+          <span>{message(block.value.label, block.value.label)}</span>
+          <strong>{cardValue(block.value.value)}</strong>
+        </article>
+      {:else if block.type === 'table'}
+        <div class="dashboard-table-wrap" data-block-type="table">
+          {#if block.value.rows.length === 0}
+            <p class="muted">{message('dashboard.table_empty')}</p>
+          {:else}
+            <table>
+              <thead><tr>{#each block.value.columns as column (column)}<th scope="col">{column}</th>{/each}</tr></thead>
+              <tbody>
+                {#each block.value.rows as row, rowIndex (rowIndex)}
+                  <tr>{#each row as cell, cellIndex (`${rowIndex}-${cellIndex}`)}<td>{typeof cell === 'string' || typeof cell === 'number' ? cell : cardValue(cell)}</td>{/each}</tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        </div>
+      {:else if block.type === 'status_panel'}
+        <aside class="dashboard-status" data-block-type="status_panel" role="status">
+          {message(block.value.messageKey, block.value.messageKey)}
+        </aside>
+      {:else if block.value.chartType === 'line'}
+        <LineChart title={chartTitle(block.value.key)} series={block.value.series} {stale} />
+      {:else if block.value.chartType === 'bar'}
+        <BarChart title={chartTitle(block.value.key)} series={block.value.series} {stale} />
+      {:else if block.value.chartType === 'scatter'}
+        <ScatterChart title={chartTitle(block.value.key)} series={block.value.series} {stale} />
+      {:else}
+        <CalendarHeatmap title={chartTitle(block.value.key)} series={block.value.series} {stale} />
+      {/if}
+    {/each}
+  </section>
+{/if}

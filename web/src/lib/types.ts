@@ -1,6 +1,122 @@
+export type AvailabilityState =
+  | "missing_capability"
+  | "missing_dependency"
+  | "incompatible_contract"
+  | "waiting_for_data"
+  | "insufficient_coverage"
+  | "ready"
+  | "disabled_by_user";
+
+export interface AvailabilityView {
+  state: AvailabilityState;
+  reasonKey: string;
+  requiredCapabilities: string[];
+  requiredDependencies: string[];
+}
+
+export type ChartPoint = [label: string, value: number | null];
+
+export interface ChartSeries {
+  name: string;
+  points: ChartPoint[];
+}
+
+export interface DashboardCard {
+  key: string;
+  label: string;
+  value: unknown;
+}
+
+export interface DashboardTable {
+  key: string;
+  columns: string[];
+  rows: unknown[][];
+}
+
+export interface DashboardStatusPanel {
+  key: string;
+  state: AvailabilityView | { type: AvailabilityState };
+  messageKey: string;
+}
+
+export interface DashboardChart {
+  key: string;
+  chartType: "line" | "bar" | "scatter" | "calendar_heatmap";
+  series: ChartSeries[];
+}
+
+export type DashboardBlock =
+  | { type: "card"; value: DashboardCard }
+  | { type: "table"; value: DashboardTable }
+  | { type: "status_panel"; value: DashboardStatusPanel }
+  | { type: "chart"; value: DashboardChart };
+
+export interface DashboardDocument {
+  titleKey: string;
+  blocks: DashboardBlock[];
+}
+
+export interface CoverageView {
+  expectedDays: number;
+  observedDays: number;
+  ratio: number;
+  sufficient: boolean;
+}
+
+export interface FreshnessView {
+  latestObservationDate: string | null;
+  generatedAt: string;
+}
+
+export interface NavigationItemView {
+  id: string;
+  pageId: string;
+  titleKey: string;
+  moduleId: string;
+  availability: AvailabilityView;
+}
+
+export interface NavigationView {
+  items: NavigationItemView[];
+}
+
+export interface DashboardPageView {
+  moduleId: string;
+  pageId: string;
+  titleKey: string;
+  document: DashboardDocument;
+  availability: AvailabilityView;
+  coverage: CoverageView;
+  freshness: FreshnessView;
+}
+
+export interface ProviderView {
+  capability: string;
+  moduleId: string;
+  activeProviders: Record<string, string>;
+}
+
+export interface DateRangeView {
+  start: string;
+  end: string;
+}
+
+export interface PhaseEventInput {
+  phaseEventId: string | null;
+  eventType: string;
+  startDate: string;
+  endDate: string;
+  description: string | null;
+  excludeFromTdee: boolean;
+}
+
+export interface PhaseEventView extends Omit<PhaseEventInput, "phaseEventId"> {
+  phaseEventId: string;
+}
+
 export interface ModuleView {
   id: string;
-  moduleType: 'source' | 'dashboard' | 'locale';
+  moduleType: "source" | "dashboard" | "locale";
   version: string;
   enabled: boolean;
   localizationNamespace: string;
@@ -9,16 +125,11 @@ export interface ModuleView {
 }
 
 export type ModuleInstallState =
-  | 'available'
-  | 'enabled'
-  | 'disabled'
-  | 'update'
-  | 'error'
-  | 'incompatible';
+  "available" | "enabled" | "disabled" | "update" | "error" | "incompatible";
 
 export interface ModuleCatalogEntry {
   module: ModuleView;
-  origin: 'bundled' | 'installed';
+  origin: "bundled" | "installed";
   installState: ModuleInstallState;
   availableVersion: string | null;
   errorCode: string | null;
@@ -52,7 +163,7 @@ export interface ScanTicket {
   coalescedRequests: number;
 }
 
-export type HealthState = 'healthy' | 'working' | 'attention' | 'blocked';
+export type HealthState = "healthy" | "working" | "attention" | "blocked";
 
 export interface HealthSummary {
   state: HealthState;
@@ -65,7 +176,7 @@ export interface HealthSummary {
 export interface IngestionStatus {
   health: HealthSummary;
   queueCapacity: number;
-  recoveryMode: 'normal' | 'recovery' | 'unconfigured';
+  recoveryMode: "normal" | "recovery" | "unconfigured";
   configured: boolean;
 }
 
