@@ -5,14 +5,18 @@
 This file records the Plan 4 analytics/dashboard work, its non-foreground
 production-path gate, historical packaged-native acceptance, and the current
 HEAD verification status. The automated Rust/web gates, deterministic package
-checks, and fresh app/DMG build checks are green at the current HEAD. Current
-packaged-native acceptance remains Draft/INCOMPLETE because CuaDriver lacks
-Accessibility and Screen Recording permissions, so no interactive assertions or
-screenshots are validly claimed. Plan 5 (desktop lifecycle, tray/background
-behavior, and release distribution) remains deferred.
-Native acceptance used a fresh isolated test profile and checked-in synthetic
-fixtures only; no real export, iCloud workspace, credential, or remote
-operation is part of this evidence.
+checks, and fresh app/DMG build checks are green at the current HEAD. The
+approved current packaged-native criterion is the manual procedure in
+`docs/testing/plan4-packaged-native-manual.md`; it is **NOT RUN** for the
+authoritative current HEAD, so no current interactive assertions or screenshots
+are claimed. The separate XCUITest contract is deferred in
+`docs/superpowers/tasks/2026-08-29-xcuitest-native-acceptance.md`. No
+third-party foreground-control daemon or macOS permission change is required by
+the current criterion. Plan 5 (desktop lifecycle, tray/background behavior, and
+release distribution) remains deferred.
+Native acceptance must use a fresh isolated test profile and checked-in
+synthetic fixtures only; no real export, private record, credential, or remote
+operation is allowed.
 
 All Task 7 runs use checked-in synthetic MyNetDiary and Hevy fixtures, a fresh
 `tempfile` app-data/workspace root, the bundled `.mfasource`/`.mfadashboard`
@@ -29,6 +33,19 @@ packages, and one serial database actor.
 | 5. Command analytics/provider integration        | `a4727858ff627d28b2750e3b67dc782bd071933c` (`feat: expose analytics and provider selection`) | Tauri command contract and Task 7 provider-selection path                                                                     |
 | 6. Local Svelte dashboard UI                     | `ad1835583f39f31e211a03dbdc400508dae5836e` (`feat: render local analytics dashboard`)        | Accepted frontend verification: 8 Vitest files / 25 tests, ESLint, Svelte check, Vite build, Prettier, and 5 Playwright tests |
 | 7. Production-path end-to-end gate               | This change                                                                                  | `bash scripts/run-dashboard-gate.sh`, plus the focused commands below                                                         |
+
+## Current Plan 4 requirement-to-evidence checklist
+
+| Requirement | Current evidence boundary |
+| --- | --- |
+| Deterministic weight, nutrition, activity, and strength analytics | `crates/mfa-analytics/tests/*_golden.rs`; semantic assertions in `crates/mfa-integration-tests/tests/dashboard_gate.rs` |
+| Rolling TDEE, coverage, phase exclusion, and persisted phase events | `crates/mfa-analytics/tests/tdee_golden.rs`; `crates/mfa-analytics/tests/phase_events.rs`; `src-tauri/tests/dashboard_commands.rs`; production gate re-query |
+| Sandboxed declarative dashboard and safe document validation | `crates/mfa-dashboard-host/tests/{document_security,dependency_isolation}.rs`; `modules/dashboards/base/tests/{conformance,document_golden}.rs`; packaged invocation in Task 7 gate |
+| Availability precedence, dependency isolation, capability/provider selection, and locale boundary | `crates/mfa-dashboard-host/tests/availability.rs`; module-host capability/locale/runtime suites; Tauri provider and command-contract tests |
+| Typed Tauri-to-Svelte dashboard shell, settings, source quality, refresh, and phase-event UI | `web/src/**/*.test.ts`; `src-tauri/tests/{dashboard_commands,ingestion_commands,module_lifecycle_commands}.rs`; 5 Playwright scenarios |
+| Serial production-path import, archive, active snapshots, all six pages, semantic goldens, and DB lifecycle | `bash scripts/run-dashboard-gate.sh`; `crates/mfa-integration-tests/tests/dashboard_gate.rs` |
+| Ingestion/actionability correction: stable current failures, idempotent Refresh, success clearing, deterministic counts, safe retry/Open Settings, and no auto-update | Focused `mfa-ingestion` and `myfitanalytics` correction tests; typed status/quality transport tests |
+| Packaged-native manual interaction and screenshots | `docs/testing/plan4-packaged-native-manual.md`; current result is **NOT RUN** |
 
 The exact historical RED stdout for Tasks 1–6 was not retained in the current
 session database. It is not reconstructed here. The table identifies the
@@ -119,7 +136,7 @@ pnpm --dir web exec svelte-check --tsconfig ./tsconfig.json
 pnpm --dir web exec eslint .
 pnpm --dir web exec prettier --check .
 pnpm --dir web build
-PLAYWRIGHT_BROWSERS_PATH=/private/tmp/MyFitAnalytics-analytics-dashboard-cache/playwright pnpm --dir web exec playwright test web/e2e/dashboard.spec.ts
+PLAYWRIGHT_BROWSERS_PATH=<session-owned-temp-cache>/playwright pnpm --dir web exec playwright test web/e2e/dashboard.spec.ts
 ```
 
 Fresh results: Vitest exited `0` with 8 files/25 tests passed; Svelte check
@@ -277,7 +294,7 @@ Native packaging and launch acceptance:
   `target/release/bundle/macos/MyFitAnalytics.app`.
 - The native run used only the checked-in synthetic `valid-full.xls`,
   `measurement_data.csv`, and `workout_data.csv`, with workspace
-  `/private/tmp/mfa-plan4-native-launchservices.l6ew1r/workspace`.
+  `$ACCEPTANCE_ROOT/workspace`.
 - The fresh profile initially showed `Healthy` / `Not configured`, three
   bundled modules `Enabled`, and Overview `Waiting for data`; it showed no
   `[[object Object]]`, raw JSON, or `Incompatible Contract`.
@@ -405,13 +422,13 @@ acceptance recorded below.
 - `entrypoint_hash` is a SHA-256 integrity/digest check, not publisher signing.
   Release signing and notarization are separate packaging controls. The
   pre-correction Plan 4 packaged native acceptance is historical as recorded
-  above. Current packaged-native acceptance remains Draft/INCOMPLETE because
-  CuaDriver lacks Accessibility and Screen Recording permissions. The fresh
-  app was ad-hoc signed; notarization was not performed, and Plan 5 remains
-  deferred.
+  above. The current approved manual packaged-native criterion is not yet run;
+  the fresh app was ad-hoc signed, notarization was not performed, and Plan 5
+  remains deferred.
 - The gate is serial and uses one actor-owned database connection.
-- README status and `docs/dashboard-module-authoring.md` intentionally separate
-  completed Plan 4 from deferred Plan 5.
+- README status, the manual runbook, and the XCUITest task intentionally
+  separate completed Plan 4 automation from the not-yet-run manual criterion,
+  deferred XCUITest work, and deferred Plan 5.
 
 ## Historical post-correction packaged native acceptance — prior artifact baseline
 
@@ -433,7 +450,7 @@ Plan 5 and notarization remain out of scope.
   `cd9b9009c1cc99a0306418fec276beb5a257deb7993849b006a7438815637c4b`.
 - `hdiutil verify` passed.
 - Acceptance root:
-  `/private/tmp/mfa-plan4-round3-acceptance.v2iDHK` (ephemeral evidence; no
+  `$ACCEPTANCE_ROOT` (ephemeral evidence; no
   personal data).
 
 ### Synthetic workspace acceptance
@@ -441,7 +458,7 @@ Plan 5 and notarization remain out of scope.
 Only the checked-in synthetic fixtures were copied: `valid-full.xls`,
 `measurement_data.csv`, and `workout_data.csv`. The exact selected workspace UI
 was
-`/private/tmp/mfa-plan4-round3-acceptance.v2iDHK/workspace`; the exact selected
+`$ACCEPTANCE_ROOT/workspace`; the exact selected
 source inboxes were under that workspace root.
 
 Refresh consumed all three inbox files. The UI became `Healthy`, with `0`
@@ -492,12 +509,14 @@ profile was restored.
 - The same Rust tree had already passed full `cargo test`, Clippy, rustfmt,
   and the production dashboard gate. This final correction was frontend-only.
 
-## Current HEAD verification status — Draft
+## Current HEAD verification status — manual acceptance NOT RUN
 
-Authoritative current HEAD is
-`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`. The implementation and automated
-verification are complete within their stated boundaries, but packaged-native
-acceptance is **Draft/INCOMPLETE**. Ready is not claimed.
+The product implementation/verification boundary is commit
+`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`; this docs-only update is layered
+on top and does not change product code. The implementation and automated
+verification are complete within their stated boundaries. The approved manual
+packaged-native criterion has not been executed on this HEAD, so its result is
+**NOT RUN** and no native pass or screenshot is claimed.
 
 ### Implemented
 
@@ -521,7 +540,7 @@ acceptance is **Draft/INCOMPLETE**. Ready is not claimed.
   frontend Vitest, Svelte check, frontend build, and diff checking. Svelte
   check reported 0 errors and the two already-known `AppShell` warnings.
   Playwright passed 5/5 using lockfile package `1.62.1` and an exact browser
-  installed in a session-owned `/private/tmp` cache.
+  installed in a session-owned temporary cache.
 - Fresh app and DMG packaging passed. The executable SHA-256 is
   `0b66ca53e055dc6101815e9b7516689c44f12a51fa7d492fa88735894812a611`; the
   DMG SHA-256 is
@@ -534,30 +553,33 @@ acceptance is **Draft/INCOMPLETE**. Ready is not claimed.
 - Residual `event_failures` belongs only to the test-only fault-injection path.
   Production `PipelineState` uses `NoFaultInjector`, whose `check` always
   returns `Ok`; it is not a source of repeated Refresh count.
-- A fresh packaged-native launch showed a visible 1200x800 window and no crash
-  in process or WebKit logs. The six guarded profile roots were restored
-  hash-identically, the guard reported every row restored, and the app process
-  is absent.
+- A prior fresh packaged launch showed a visible 1200x800 window and no crash in
+  process or WebKit logs; that observation is historical and is not current
+  manual acceptance evidence. The approved current procedure requires a fresh
+  run, six-root hash guard, clean quit, and safe screenshot review.
 
 ### Not implemented
 
-- Valid interactive packaged-native assertions and synthetic-only screenshots
-  were not gathered. CuaDriver lacked both Accessibility and Screen Recording,
-  so native UI observations could not be validly collected.
-- Final Ready status and final Terra approval are not claimed.
+- The approved manual packaged-native acceptance has not been run on the current
+  HEAD; interactive assertions and synthetic-only screenshots are therefore not
+  claimed.
+- XCUITest is deferred to the separate planning-only follow-up task.
 
 ### Remaining work
 
-1. Grant CuaDriver Accessibility and Screen Recording permissions.
-2. Rerun the full fresh packaged-native acceptance against the current
-   artifact baseline.
-3. Update the native evidence with valid interactive observations and
-   synthetic-only screenshots.
-4. Obtain final Terra review.
+1. Execute `docs/testing/plan4-packaged-native-manual.md` against a fresh
+   packaged artifact and record every pass/fail row, or record a truthful
+   `BLOCKED`/`FAIL` result.
+2. If native automation is desired later, obtain approval for and execute the
+   separate XCUITest feasibility/task contract; it is not required for the
+   current Plan 4 criterion.
+3. Obtain review of the completed manual record before reclassifying it as
+   passed.
 
 ### Blockers
 
-The exact blocker is missing CuaDriver Accessibility and Screen Recording
-permissions. Until both are granted, packaged-native acceptance remains
-Draft/INCOMPLETE. Plan 5 remains out of scope, and remote push, PR update, and
-merge are not authorized.
+No product or automated-gate blocker is recorded. The manual result is simply
+not yet executed; any permission prompt or non-synthetic input during the
+runbook is a stop condition requiring separate approval, not an invitation to
+change permissions or add a foreground-control daemon. Plan 5 remains out of
+scope, and remote push, PR update, and merge are not authorized.

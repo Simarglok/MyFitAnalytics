@@ -4,33 +4,33 @@ MyFitAnalytics is a local-first, private workspace for personal fitness analytic
 
 ## Status
 
-Plan 4 (analytics and dashboard UI) is complete at product scope. At the
-authoritative current HEAD
-`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`, the mandatory Rust/web gates,
+Plan 4 (analytics and dashboard UI) is complete at product and automated-gate
+scope. At the implementation baseline documented by the Plan 4 evidence, the
+mandatory Rust/web gates,
 deterministic module/package checks, and fresh app/DMG build checks are green.
-Packaged-native macOS acceptance remains Draft/INCOMPLETE: a fresh launch showed
-a visible 1200x800 window with no crash in process/WebKit logs, but CuaDriver
-lacks Accessibility and Screen Recording permissions, so no interactive
-assertions or screenshots are validly claimed. The repository includes the Rust
-workspace, shared versioned contracts, module package validation and
-installation, Storage/Ingestion, bundled Hevy and MyNetDiary source modules,
-deterministic base analytics, a sandboxed Wasm component host,
-capability/provider resolution, locale fallback, and a typed Tauri-to-Svelte
-dashboard shell.
+The approved current packaged-native criterion is the manual procedure in
+[`docs/testing/plan4-packaged-native-manual.md`](docs/testing/plan4-packaged-native-manual.md),
+which is **NOT RUN** for this checkout; no current interactive native result or
+screenshot is claimed. XCUITest is a separate deferred follow-up at
+[`docs/superpowers/tasks/2026-08-29-xcuitest-native-acceptance.md`](docs/superpowers/tasks/2026-08-29-xcuitest-native-acceptance.md).
+No third-party foreground-control daemon or macOS permission change is required
+for the current criterion. The repository includes the Rust workspace, shared
+versioned contracts, module package validation and installation,
+Storage/Ingestion, bundled Hevy and MyNetDiary source modules, deterministic
+base analytics, a sandboxed Wasm component host, capability/provider
+resolution, locale fallback, and a typed Tauri-to-Svelte dashboard shell.
 
 The backend supplies the initial dashboard window as an inclusive 31-day range
 ending at the latest available observation, or at the current local date when
 no observation exists; the frontend does not invent a production date default.
 
-Task 7's automated gate and the packaged-native acceptance use only checked-in
-synthetic MyNetDiary and Hevy fixtures, isolated temporary roots, and the
-application command services. The current packaged-native acceptance is
-incomplete until CuaDriver Accessibility and Screen Recording are granted, the
-full fresh acceptance is rerun, native evidence is updated, and final Terra
-review is obtained. Plan 5 (desktop lifecycle, tray/background behavior, and
-release packaging) remains deferred and out of scope. Local macOS `.app` and DMG
-bundles, when built, are development validation artifacts; notarization and
-publishing remain deferred, out of scope, and unclaimed.
+Task 7's automated gate and the approved manual packaged-native scenario use
+only checked-in synthetic MyNetDiary and Hevy fixtures, isolated temporary
+roots, and the application command services. Plan 5 (desktop lifecycle,
+tray/background behavior, and release packaging) remains deferred and out of
+scope. Local macOS `.app` and DMG bundles, when built, are development
+validation artifacts; notarization and publishing remain deferred, out of scope,
+and unclaimed.
 
 ## Architecture
 
@@ -120,6 +120,8 @@ The root shortcuts `pnpm run test`, `pnpm run check`, and `pnpm run build` deleg
 - [Storage and ingestion plan](docs/superpowers/plans/2026-08-25-myfitanalytics-storage-ingestion.md)
 - [Source modules plan](docs/superpowers/plans/2026-08-25-myfitanalytics-source-modules.md)
 - [Analytics and dashboard UI plan](docs/superpowers/plans/2026-08-25-myfitanalytics-analytics-ui.md)
+- [Plan 4 packaged-native manual acceptance](docs/testing/plan4-packaged-native-manual.md)
+- [XCUITest native acceptance follow-up](docs/superpowers/tasks/2026-08-29-xcuitest-native-acceptance.md)
 - [Dashboard module authoring](docs/dashboard-module-authoring.md)
 - [Desktop lifecycle and release plan](docs/superpowers/plans/2026-08-25-myfitanalytics-desktop-release.md)
 
