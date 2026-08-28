@@ -61,11 +61,11 @@ test.describe("dashboard through deterministic mock transport", () => {
     page,
   }) => {
     await openMockApp(page);
-    await page.getByRole("button", { name: "Sources & quality" }).click();
-    await expect(page.getByText("Settings", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Settings" }).click();
     await expect(
       page.getByRole("button", { name: "Install Module Package…" }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Sources & quality" }).click();
     await expect(
       page.getByText("One deterministic quality issue"),
     ).toBeVisible();
