@@ -126,6 +126,55 @@ describe("App shell", () => {
     unmount(app);
   });
 
+  it("explains import failures and opens Settings for required module updates", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const app = mount(App, {
+      target,
+      props: {
+        transport: new MockTransport({
+          bootstrap,
+          modules,
+          status: {
+            health: {
+              state: "attention",
+              workingJobs: 0,
+              waitingAssets: 0,
+              attentionItems: 2,
+              criticalItems: 0,
+              failureCodeCounts: { module_guest_error: 2 },
+            },
+            queueCapacity: 32,
+            recoveryMode: "normal",
+            configured: true,
+            pendingModuleUpdates: ["base", "MyNetDiary"],
+          },
+        }),
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain(
+        "Imported data could not be processed",
+      ),
+    );
+    expect(target.textContent).toContain("module_guest_error (2)");
+    expect(target.textContent).toContain(
+      "Module updates required: base, MyNetDiary",
+    );
+    const settings = target.querySelector<HTMLButtonElement>(
+      '[data-action="open-settings"]',
+    );
+    expect(settings?.textContent).toContain("Open settings");
+    settings?.click();
+    await vi.waitFor(() =>
+      expect(
+        target.querySelector('[data-action="choose-workspace"]'),
+      ).toBeTruthy(),
+    );
+    unmount(app);
+  });
+
   it("shows local Settings navigation alongside Phase events", async () => {
     const target = document.createElement("div");
     document.body.append(target);

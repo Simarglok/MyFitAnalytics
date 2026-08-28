@@ -188,6 +188,7 @@ export interface HealthSummary {
   waitingAssets: number;
   attentionItems: number;
   criticalItems: number;
+  failureCodeCounts: Record<string, number>;
 }
 
 export interface IngestionStatus {
@@ -195,6 +196,7 @@ export interface IngestionStatus {
   queueCapacity: number;
   recoveryMode: "normal" | "recovery" | "unconfigured";
   configured: boolean;
+  pendingModuleUpdates: string[];
 }
 
 export interface QualityItem {

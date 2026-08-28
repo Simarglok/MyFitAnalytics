@@ -95,6 +95,7 @@ pub struct HealthView {
     pub waiting_assets: u64,
     pub attention_items: u64,
     pub critical_items: u64,
+    pub failure_code_counts: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +105,7 @@ pub struct IngestionStatusView {
     pub queue_capacity: usize,
     pub recovery_mode: String,
     pub configured: bool,
+    pub pending_module_updates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1574,6 +1576,15 @@ pub async fn refresh_now_inner(state: &AppState) -> Result<ScanTicketView, Comma
 pub async fn get_ingestion_status_inner(
     state: &AppState,
 ) -> Result<IngestionStatusView, CommandError> {
+    let mut pending_module_updates = list_module_catalog_inner(state)
+        .await?
+        .into_iter()
+        .filter(|entry| {
+            entry.origin == "bundled" && entry.install_state == "update" && entry.module.enabled
+        })
+        .map(|entry| entry.module.display_name)
+        .collect::<Vec<_>>();
+    pending_module_updates.sort();
     let (database, coordinators, gate, queue_capacity) = {
         let storage = state.storage_lock().map_err(CommandError::from)?;
         let Some(storage) = storage.as_ref() else {
@@ -1582,6 +1593,7 @@ pub async fn get_ingestion_status_inner(
                 queue_capacity: 0,
                 recovery_mode: "unconfigured".to_owned(),
                 configured: false,
+                pending_module_updates,
             });
         };
         (
@@ -1599,6 +1611,7 @@ pub async fn get_ingestion_status_inner(
             message: error.to_string(),
         })?;
     let mut health = HealthSnapshot::from_counts(0, 0, 0, 0);
+    let mut failure_code_counts = BTreeMap::new();
     for coordinator in coordinators {
         let snapshot = coordinator.health_snapshot();
         health = HealthSnapshot::from_counts(
@@ -1607,7 +1620,11 @@ pub async fn get_ingestion_status_inner(
             health.attention_items + snapshot.attention_items,
             health.critical_items + snapshot.critical_items,
         );
+        for (code, count) in snapshot.failure_code_counts {
+            *failure_code_counts.entry(code).or_insert(0) += count;
+        }
     }
+    health.failure_code_counts = failure_code_counts;
     Ok(IngestionStatusView {
         health: health_view(health),
         queue_capacity,
@@ -1617,6 +1634,7 @@ pub async fn get_ingestion_status_inner(
         }
         .to_owned(),
         configured: true,
+        pending_module_updates,
     })
 }
 
@@ -1772,6 +1790,7 @@ fn health_view(snapshot: HealthSnapshot) -> HealthView {
         waiting_assets: snapshot.waiting_assets,
         attention_items: snapshot.attention_items,
         critical_items: snapshot.critical_items,
+        failure_code_counts: snapshot.failure_code_counts,
     }
 }
 

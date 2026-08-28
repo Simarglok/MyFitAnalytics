@@ -89,6 +89,10 @@
       await dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
     }
   }
+
+  function openSettings(): void {
+    appStore.select('settings', 'local');
+  }
 </script>
 
 <svelte:head>
@@ -116,7 +120,11 @@
       <span class="locale" aria-label="Current locale">{locale}</span>
     </header>
 
-    <StatusBanner status={appState.ingestionStatus} refreshing={appState.refreshing} />
+    <StatusBanner
+      status={appState.ingestionStatus}
+      refreshing={appState.refreshing}
+      onOpenSettings={openSettings}
+    />
     <div class="shell-actions">
       <button type="button" onclick={() => void refresh()} disabled={appState.refreshing}>
         {appState.refreshing ? message('app.refreshing') : message('app.refresh')}

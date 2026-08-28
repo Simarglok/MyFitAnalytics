@@ -29,10 +29,12 @@ const status: IngestionStatus = {
     waitingAssets: 0,
     attentionItems: 0,
     criticalItems: 0,
+    failureCodeCounts: {},
   },
   queueCapacity: 32,
   recoveryMode: "normal",
   configured: true,
+  pendingModuleUpdates: [],
 };
 
 describe("storage transport boundary", () => {

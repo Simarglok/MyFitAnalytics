@@ -373,10 +373,12 @@ export class MockTransport implements AppTransport {
           waitingAssets: 0,
           attentionItems: 0,
           criticalItems: 0,
+          failureCodeCounts: {},
         },
         queueCapacity: 32,
         recoveryMode: "unconfigured",
         configured: false,
+        pendingModuleUpdates: [],
       }
     );
   }

@@ -278,6 +278,63 @@ async fn guest_parse_failure_marks_the_attempt_failed_without_restart() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repeated_failed_scans_keep_one_current_attention_and_report_code_counts() {
+    let temp = TempDir::new().unwrap();
+    let runtime = fake_runtime(nutrition_batch());
+    runtime.fail_always();
+    let (coordinator, database, source) = coordinator_with_runtime(&temp, runtime).await;
+    let inbox = WorkspacePaths::new(temp.path().join("workspace")).source_inbox(&source);
+    std::fs::write(inbox.join("repeated-failure.fixture"), b"synthetic failure").unwrap();
+
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let first = coordinator.health_snapshot();
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let second = coordinator.health_snapshot();
+
+    assert_eq!(first.attention_items, 1);
+    assert_eq!(second.attention_items, 1);
+    assert_eq!(
+        second.failure_code_counts.get("module_guest_error"),
+        Some(&1)
+    );
+    database.shutdown().await.unwrap();
+    coordinator.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_processing_clears_current_attention_and_failure_code_count() {
+    let temp = TempDir::new().unwrap();
+    let runtime = fake_runtime(nutrition_batch());
+    runtime.fail_next();
+    let (coordinator, database, source) = coordinator_with_runtime(&temp, runtime).await;
+    let inbox = WorkspacePaths::new(temp.path().join("workspace")).source_inbox(&source);
+    std::fs::write(
+        inbox.join("recoverable-failure.fixture"),
+        b"synthetic recovery",
+    )
+    .unwrap();
+
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let failed = coordinator.health_snapshot();
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let recovered = coordinator.health_snapshot();
+
+    assert_eq!(failed.attention_items, 1);
+    assert_eq!(
+        failed.failure_code_counts.get("module_guest_error"),
+        Some(&1)
+    );
+    assert_eq!(recovered.attention_items, 0);
+    assert!(recovered.failure_code_counts.is_empty());
+    database.shutdown().await.unwrap();
+    coordinator.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn manual_retry_guest_failure_marks_its_attempt_failed_immediately() {
     let temp = TempDir::new().unwrap();
     let runtime = fake_runtime(nutrition_batch());

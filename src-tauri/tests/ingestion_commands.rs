@@ -2,11 +2,15 @@ use mfa_config::{AppSettings, SettingsStore};
 use mfa_contracts::ModuleId;
 use myfitanalytics::dialogs::DialogPort;
 use serde_json::json;
+use sha2::Digest;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio::time::{Duration, timeout};
+use zip::CompressionMethod;
+use zip::write::SimpleFileOptions;
 
 struct WorkspacePicker(Mutex<Option<PathBuf>>);
 
@@ -166,6 +170,38 @@ fn event_state() -> (myfitanalytics::AppState, TempDir) {
     (state, root)
 }
 
+fn bundled_source_update(root: &std::path::Path) -> PathBuf {
+    let wasm = include_bytes!("../../crates/mfa-module-host/tests/fixtures/guest-source.wasm");
+    let entry_hash = format!("sha256:{:x}", sha2::Sha256::digest(wasm));
+    let manifest = serde_json::json!({
+        "module_type": "source",
+        "module_id": "bundled-source",
+        "module_version": "2.0.0",
+        "package_format_version": "1.0.0",
+        "source_api_version": "1.0.0",
+        "mapping_version": "1.0.0",
+        "compatible_app_versions": [">=0.1.0"],
+        "provided_capabilities": ["body.weight"],
+        "accepted_file_patterns": ["*.json"],
+        "artifact_signatures": [entry_hash],
+        "extension_contracts": [],
+        "settings_schema": {},
+        "entrypoint_hash": entry_hash,
+        "localization_namespace": "source.bundled"
+    });
+    let path = root.join("bundled-source-update.mfasource");
+    let file = fs::File::create(&path).unwrap();
+    let mut archive = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let manifest = serde_json::to_vec(&manifest).unwrap();
+    archive.start_file("module.json", options).unwrap();
+    archive.write_all(&manifest).unwrap();
+    archive.start_file("module.wasm", options).unwrap();
+    archive.write_all(wasm).unwrap();
+    archive.finish().unwrap();
+    path
+}
+
 #[tokio::test]
 async fn workspace_command_persists_settings_and_exposes_non_icloud_paths() {
     let (state, root, _config_root) = state();
@@ -263,6 +299,57 @@ async fn refresh_scans_all_enabled_sources_with_independent_health() {
         .unwrap();
 
     assert_eq!(status.health.attention_items, 2);
+    state.shutdown_storage().await.unwrap();
+}
+
+#[tokio::test]
+async fn ingestion_status_aggregates_failure_code_counts_across_sources() {
+    let (state, root) = two_source_state();
+    let view = choose_workspace_root(&state, root.path().join("workspace")).await;
+    for source in &view.source_paths {
+        fs::write(
+            std::path::Path::new(&source.inbox_path).join("failed.json"),
+            source.module_id.as_bytes(),
+        )
+        .unwrap();
+    }
+
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    let status = myfitanalytics::commands::get_ingestion_status_inner(&state)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        status
+            .health
+            .failure_code_counts
+            .values()
+            .copied()
+            .sum::<u64>(),
+        2
+    );
+    state.shutdown_storage().await.unwrap();
+}
+
+#[tokio::test]
+async fn ingestion_status_lists_enabled_bundled_updates_by_display_name() {
+    let (state, root, _config_root) = state();
+    state.register_bundled_package(
+        ModuleId::try_from("bundled-source").unwrap(),
+        bundled_source_update(root.path()),
+    );
+    choose_workspace_root(&state, root.path().join("workspace")).await;
+
+    let status = myfitanalytics::commands::get_ingestion_status_inner(&state)
+        .await
+        .unwrap();
+
+    assert_eq!(status.pending_module_updates, vec!["bundled-source"]);
     state.shutdown_storage().await.unwrap();
 }
 

@@ -19,9 +19,11 @@ use mfa_db::{
     SourceRecord, ValidatedSnapshotBatch, validation,
 };
 use mfa_module_host::{InstalledModule, RuntimeError, RuntimeLimits};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -188,9 +190,14 @@ struct PipelineState {
     fail_next_asset: bool,
     fault_injector: Arc<dyn FaultInjector>,
     recovery_gate: RecoveryGate,
-    failed_assets: u64,
+    current_failures: BTreeMap<String, FailureSummary>,
     event_failures: u64,
-    critical_failures: u64,
+}
+
+#[derive(Clone)]
+struct FailureSummary {
+    code: String,
+    critical: bool,
 }
 
 #[derive(Clone)]
@@ -224,9 +231,8 @@ impl IngestionCoordinator {
             fail_next_asset: false,
             fault_injector: Arc::new(NoFaultInjector),
             recovery_gate: RecoveryGate::ready(),
-            failed_assets: 0,
+            current_failures: BTreeMap::new(),
             event_failures: 0,
-            critical_failures: 0,
         }));
         let executor = PipelineExecutor {
             state: Arc::clone(&state),
@@ -298,11 +304,24 @@ impl IngestionCoordinator {
 
     pub fn health_snapshot(&self) -> crate::health::HealthSnapshot {
         let guard = self.state.lock().unwrap();
-        crate::health::HealthSnapshot::from_counts(
+        let mut failure_code_counts = BTreeMap::new();
+        let critical_failures = guard
+            .current_failures
+            .values()
+            .filter(|failure| failure.critical)
+            .count() as u64;
+        for failure in guard.current_failures.values() {
+            *failure_code_counts.entry(failure.code.clone()).or_insert(0) += 1;
+        }
+        if guard.event_failures > 0 {
+            failure_code_counts.insert("event_emission_failed".to_owned(), guard.event_failures);
+        }
+        crate::health::HealthSnapshot::from_counts_with_failure_codes(
             0,
             0,
-            guard.failed_assets + guard.event_failures,
-            guard.critical_failures,
+            guard.current_failures.len() as u64 + guard.event_failures,
+            critical_failures,
+            failure_code_counts,
         )
     }
 
@@ -370,19 +389,23 @@ async fn run_scan(
     _request: ScanRequest,
 ) -> Result<ScanReport, IngestionError> {
     let mut report = ScanReport::default();
+    let mut current_failures = BTreeMap::new();
     let archived_assets = match reconcile_archive_assets(&state).await {
         Ok(assets) => assets,
         Err(error) => {
             report.failed_assets += 1;
-            if let Ok(mut guard) = state.lock() {
-                guard.failed_assets += 1;
-                guard.critical_failures += 1;
-            }
-            let _ = error;
+            current_failures.insert(
+                "archive_reconciliation".to_owned(),
+                FailureSummary {
+                    code: error.code().to_owned(),
+                    critical: true,
+                },
+            );
             Vec::new()
         }
     };
     for archived in archived_assets {
+        let failure_identity = format!("asset:{}", archived.asset_id);
         let (dependencies, runtime) = {
             let guard = state.lock().map_err(|_| poisoned())?;
             (
@@ -405,12 +428,7 @@ async fn run_scan(
             Ok(None) => report.duplicate_assets += 1,
             Err(error) => {
                 report.failed_assets += 1;
-                if let Ok(mut guard) = state.lock() {
-                    guard.failed_assets += 1;
-                    if matches!(error, IngestionError::CriticalFailure { .. }) {
-                        guard.critical_failures += 1;
-                    }
-                }
+                record_failure(&mut current_failures, failure_identity, &error);
             }
         }
     }
@@ -431,21 +449,43 @@ async fn run_scan(
             })?
     };
     for candidate in candidates {
+        let failure_identity = prearchive_failure_identity(&candidate.path);
         match process_candidate(Arc::clone(&state), candidate).await {
             Ok(AssetOutcome::Completed) => report.completed_assets += 1,
             Ok(AssetOutcome::Duplicate) => report.duplicate_assets += 1,
             Err(error) => {
                 report.failed_assets += 1;
-                if let Ok(mut guard) = state.lock() {
-                    guard.failed_assets += 1;
-                    if matches!(error, IngestionError::CriticalFailure { .. }) {
-                        guard.critical_failures += 1;
-                    }
-                }
+                record_failure(&mut current_failures, failure_identity, &error);
             }
         }
     }
+    if let Ok(mut guard) = state.lock() {
+        guard.current_failures = current_failures;
+    }
     Ok(report)
+}
+
+fn prearchive_failure_identity(path: &Path) -> String {
+    let mut digest = Sha256::new();
+    digest.update(path.to_string_lossy().as_bytes());
+    format!("prearchive:{:x}", digest.finalize())
+}
+
+fn record_failure(
+    failures: &mut BTreeMap<String, FailureSummary>,
+    identity: String,
+    error: &IngestionError,
+) {
+    let (code, critical) = match error {
+        IngestionError::AssetFailure { code, .. }
+        | IngestionError::TransientFailure { code, .. }
+        | IngestionError::CriticalFailure { code, .. } => (
+            code.clone(),
+            matches!(error, IngestionError::CriticalFailure { .. }),
+        ),
+        _ => (error.code().to_owned(), false),
+    };
+    failures.insert(identity, FailureSummary { code, critical });
 }
 
 async fn reconcile_archive_assets(
