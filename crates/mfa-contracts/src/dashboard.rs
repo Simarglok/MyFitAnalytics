@@ -42,11 +42,29 @@ pub enum DashboardBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DashboardSummaryValue {
+    Text(String),
+    Number(f64),
+    Boolean(bool),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardCardPresentation {
+    pub summary_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_value: Option<DashboardSummaryValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardCard {
     pub key: String,
     pub label: String,
     pub value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<DashboardCardPresentation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

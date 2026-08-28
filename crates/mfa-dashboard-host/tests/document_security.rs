@@ -40,6 +40,7 @@ fn safe_document() -> DashboardDocument {
                 key: "weight-card".to_owned(),
                 label: "dashboard.weight".to_owned(),
                 value: json!({"dataset": "body.weight", "value": 82.5}),
+                presentation: None,
             }),
             DashboardBlock::Chart(DashboardChart {
                 key: "weight-chart".to_owned(),
@@ -186,6 +187,36 @@ fn validator_rejects_unknown_fields_at_every_document_shape() {
             "unknown document field was accepted: {raw}"
         );
     }
+}
+
+#[test]
+fn validator_accepts_reviewed_card_presentation_and_rejects_structured_summary_values() {
+    let valid = json!({
+        "title_key": "dashboard.title",
+        "blocks": [{
+            "type": "card",
+            "value": {
+                "key": "weight-card",
+                "label": "dashboard.weight",
+                "value": {"dataset": "body.weight", "value": 82.5},
+                "presentation": {
+                    "summary_key": "dashboard.weight",
+                    "summary_value": 82.5
+                }
+            }
+        }]
+    });
+    validate_document_json(&valid, &grant(), &keys()).unwrap();
+
+    let mut invalid = valid;
+    invalid["blocks"][0]["value"]["presentation"]["summary_value"] =
+        json!({"raw": "structured payload"});
+    assert_eq!(
+        validate_document_json(&invalid, &grant(), &keys())
+            .unwrap_err()
+            .code(),
+        "malformed_document"
+    );
 }
 
 #[test]

@@ -4,8 +4,8 @@ wit_bindgen::generate!({
 });
 
 use mfa_contracts::{
-    AvailabilityState, CapabilityId, DashboardBlock, DashboardCard, DashboardChart,
-    DashboardDocument, DashboardInput, DashboardSeries, DashboardStatusPanel,
+    AvailabilityState, CapabilityId, DashboardBlock, DashboardCard, DashboardCardPresentation,
+    DashboardChart, DashboardDocument, DashboardInput, DashboardSeries, DashboardStatusPanel,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -156,10 +156,29 @@ pub(crate) fn value_or_missing_field(
 }
 
 pub(crate) fn card(key: &str, label: &str, value: Value) -> DashboardBlock {
+    let presentation = reviewed_card_presentation(&value);
     DashboardBlock::Card(DashboardCard {
         key: key.to_owned(),
         label: label.to_owned(),
         value,
+        presentation,
+    })
+}
+
+fn reviewed_card_presentation(value: &Value) -> Option<DashboardCardPresentation> {
+    let available = value
+        .get("available")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            value
+                .get("state")
+                .and_then(Value::as_str)
+                .map(|state| state == "ready")
+        })
+        .unwrap_or(false);
+    available.then(|| DashboardCardPresentation {
+        summary_key: "base.card_available".to_owned(),
+        summary_value: None,
     })
 }
 

@@ -2,6 +2,7 @@
   "namespace": "base",
   "locale": "en",
   "keys": {
+    "card_available": "Available",
     "overview.title": "Overview",
     "overview.body_weight": "Body weight",
     "overview.nutrition": "Nutrition",

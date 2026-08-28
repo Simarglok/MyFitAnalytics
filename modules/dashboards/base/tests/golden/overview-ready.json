@@ -18,6 +18,9 @@
               "value": 82.3
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -50,6 +53,9 @@
               }
             ]
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },

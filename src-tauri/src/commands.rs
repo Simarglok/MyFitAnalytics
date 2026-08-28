@@ -828,6 +828,10 @@ async fn dashboard_input(
             }
         }
     }
+    let snapshot_modules = snapshots
+        .iter()
+        .map(|(module_id, _)| module_id.clone())
+        .collect::<BTreeSet<_>>();
     let mut weight_observations = Vec::new();
     let mut body_measurements = Vec::new();
     let mut nutrition_items = Vec::new();
@@ -1088,6 +1092,12 @@ async fn dashboard_input(
         .iter()
         .filter(|requirement| declared.contains(&requirement.capability))
     {
+        let Some(provider) = providers.active_providers.get(&requirement.capability) else {
+            continue;
+        };
+        if !snapshot_modules.contains(provider) {
+            continue;
+        }
         let name = requirement.capability.as_str();
         let value = match name {
             "body.weight" => weight_value.clone(),
@@ -1267,6 +1277,7 @@ fn base_localization_keys() -> BTreeSet<String> {
         "overview.quality",
         "overview.quality_ready",
         "overview.quality_missing",
+        "card_available",
         "overview.trend",
         "body.title",
         "body.raw_weight",

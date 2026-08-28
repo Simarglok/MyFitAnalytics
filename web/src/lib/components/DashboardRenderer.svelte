@@ -5,18 +5,22 @@
   import LineChart from './charts/LineChart.svelte';
   import ScatterChart from './charts/ScatterChart.svelte';
   import { message } from '../i18n';
+  import { formatNumber } from '../i18n/format';
   import type {
     AvailabilityView,
     ChartSeries,
     DashboardBlock,
     DashboardChart,
     DashboardDocument,
+    DashboardCardPresentation,
+    DashboardSummaryValue,
     DashboardTable,
   } from '../types';
 
   export let document: unknown;
   export let availability: AvailabilityView | null = null;
   export let stale = false;
+  export let locale = 'en-US';
 
   type SafeDocument = DashboardDocument;
 
@@ -56,10 +60,22 @@
   function decodeBlock(value: unknown): DashboardBlock | null {
     if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.value)) return null;
     switch (value.type) {
-      case 'card':
-        return typeof value.value.key === 'string' && typeof value.value.label === 'string'
-          ? { type: 'card', value: { key: value.value.key, label: value.value.label, value: value.value.value } }
-          : null;
+      case 'card': {
+        if (typeof value.value.key !== 'string' || typeof value.value.label !== 'string') {
+          return null;
+        }
+        const presentation = decodePresentation(value.value.presentation);
+        if (presentation === null) return null;
+        return {
+          type: 'card',
+          value: {
+            key: value.value.key,
+            label: value.value.label,
+            value: value.value.value,
+            ...(presentation === undefined ? {} : { presentation }),
+          },
+        };
+      }
       case 'table':
         return decodeTable(value.value);
       case 'status_panel':
@@ -85,6 +101,35 @@
       type: 'table',
       value: { key: value.key, columns: value.columns, rows: value.rows as unknown[][] },
     };
+  }
+
+  function decodePresentation(value: unknown): DashboardCardPresentation | undefined | null {
+    if (value === undefined || value === null) return undefined;
+    if (!isRecord(value)) return null;
+    const summaryKey = typeof value.summaryKey === 'string'
+      ? value.summaryKey
+      : typeof value.summary_key === 'string'
+        ? value.summary_key
+        : null;
+    if (summaryKey === null) return null;
+    const summaryValue = value.summaryValue ?? value.summary_value;
+    if (summaryValue !== undefined && summaryValue !== null && !isSummaryValue(summaryValue)) {
+      return null;
+    }
+    return {
+      summaryKey,
+      ...(summaryValue === undefined
+        ? {}
+        : { summaryValue: summaryValue as DashboardSummaryValue | null }),
+    };
+  }
+
+  function isSummaryValue(value: unknown): value is DashboardSummaryValue {
+    return (
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value))
+    );
   }
 
   function decodeStatus(value: Record<string, unknown>): DashboardBlock | null {
@@ -161,14 +206,22 @@
 
   $: safeOutput = decodeOutput(document);
 
-  function cardValue(value: unknown): string {
-    if (value === null || value === undefined) return message('dashboard.card_empty');
-    if (typeof value === 'string' || typeof value === 'number') return String(value);
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return message('dashboard.card_empty');
+  function cardValue(value: unknown, presentation?: DashboardCardPresentation): string {
+    if (presentation) {
+      const summary = message(presentation.summaryKey, presentation.summaryKey);
+      if (presentation.summaryValue === undefined || presentation.summaryValue === null) {
+        return summary;
+      }
+      const renderedValue = typeof presentation.summaryValue === 'number'
+        ? formatNumber(presentation.summaryValue, locale)
+        : String(presentation.summaryValue);
+      return `${summary}: ${renderedValue}`;
     }
+    if (value === null || value === undefined) return message('dashboard.card_empty');
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    return message('dashboard.card_empty');
   }
 
   function chartTitle(key: string): string {
@@ -197,7 +250,7 @@
       {#if block.type === 'card'}
         <article class="dashboard-card" data-block-type="card">
           <span>{message(block.value.label, block.value.label)}</span>
-          <strong>{cardValue(block.value.value)}</strong>
+          <strong>{cardValue(block.value.value, block.value.presentation)}</strong>
         </article>
       {:else if block.type === 'table'}
         <div class="dashboard-table-wrap" data-block-type="table">

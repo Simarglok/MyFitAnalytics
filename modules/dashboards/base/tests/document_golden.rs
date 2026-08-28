@@ -132,6 +132,29 @@ fn every_required_page_has_reviewed_ready_document_shape() {
 }
 
 #[test]
+fn ready_cards_include_reviewed_presentation_without_changing_semantic_values() {
+    let document = compose_page(BasePage::Nutrition, &ready_input());
+    let cards = document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            DashboardBlock::Card(card) => Some(card),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(!cards.is_empty());
+    for card in cards {
+        let serialized = serde_json::to_value(card).unwrap();
+        assert_eq!(
+            serialized["presentation"]["summary_key"],
+            "base.card_available"
+        );
+        assert!(serialized["value"].get("available").is_some());
+    }
+}
+
+#[test]
 fn missing_page_inputs_keep_graphs_visible_with_exact_state() {
     let cases = [
         (BasePage::Overview, "overview-empty.json"),

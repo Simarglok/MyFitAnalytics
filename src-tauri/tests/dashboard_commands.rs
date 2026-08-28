@@ -120,3 +120,55 @@ async fn phase_event_command_round_trips_a_user_owned_event() {
             .contains(root.path().to_string_lossy().as_ref())
     );
 }
+
+#[test]
+fn availability_state_serializes_as_a_primitive_snake_case_string() {
+    let view = myfitanalytics::view_models::AvailabilityView {
+        state: mfa_contracts::AvailabilityState::WaitingForData,
+        reason_key: "dashboard.waiting_for_data".to_owned(),
+        required_capabilities: vec!["body.weight".to_owned()],
+        required_dependencies: Vec::new(),
+        freshness: mfa_dashboard_host::Freshness::Fresh,
+        action: Some("dashboard.action.import_data".to_owned()),
+    };
+
+    let serialized = serde_json::to_value(view).unwrap();
+    assert_eq!(serialized["state"], "waiting_for_data");
+    assert!(serialized["state"].is_string());
+}
+
+#[tokio::test]
+async fn unconfigured_dashboard_does_not_emit_ready_inner_status_or_capabilities() {
+    let (state, _root) = state();
+    let dashboard = get_dashboard_inner(
+        "base".to_owned(),
+        "overview".to_owned(),
+        DateRangeView::synthetic_default(),
+        &state,
+    )
+    .await
+    .unwrap();
+
+    assert_ne!(
+        dashboard.availability.state,
+        mfa_contracts::AvailabilityState::Ready
+    );
+    let document = match dashboard.document {
+        DashboardOutput::Document(document) => document,
+        other => panic!("expected a non-error dashboard document, got {other:?}"),
+    };
+    assert!(!document.blocks.iter().any(|block| matches!(
+        block,
+        DashboardBlock::StatusPanel(panel)
+            if panel.state == mfa_contracts::AvailabilityState::Ready
+    )));
+    let body_weight = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            DashboardBlock::Card(card) if card.key == "overview.body_weight" => Some(&card.value),
+            _ => None,
+        })
+        .expect("overview body weight card");
+    assert_eq!(body_weight["available"], false);
+}

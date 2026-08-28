@@ -30,6 +30,9 @@
               }
             ]
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -48,6 +51,9 @@
               "quality": "complete"
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -64,6 +70,9 @@
               "value": 2400.0
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -80,6 +89,9 @@
             },
             "state": "insufficient_coverage"
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },

@@ -1,11 +1,12 @@
 use crate::document::{DashboardOutput, ModuleErrorView};
-use mfa_contracts::{DashboardBlock, DashboardDocument, DashboardInput};
+use mfa_contracts::{DashboardBlock, DashboardDocument, DashboardInput, DashboardSummaryValue};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
 const MAX_POINTS_PER_SERIES: usize = 5_000;
 const MAX_POINTS_PER_DOCUMENT: usize = 10_000;
+const MAX_SUMMARY_TEXT_LENGTH: usize = 512;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DocumentValidationError {
@@ -56,6 +57,12 @@ pub fn validate_document(
         match block {
             DashboardBlock::Card(card) => {
                 localization_key(&card.label, localization_keys)?;
+                if let Some(presentation) = &card.presentation {
+                    localization_key(&presentation.summary_key, localization_keys)?;
+                    if let Some(value) = &presentation.summary_value {
+                        validate_summary_value(value)?;
+                    }
+                }
                 validate_value(&card.value, grant)?;
             }
             DashboardBlock::Table(table) => {
@@ -221,6 +228,21 @@ fn validate_value(value: &Value, grant: &DashboardInput) -> Result<(), DocumentV
             }
             Ok(())
         }
+    }
+}
+
+fn validate_summary_value(value: &DashboardSummaryValue) -> Result<(), DocumentValidationError> {
+    match value {
+        DashboardSummaryValue::Text(value) => {
+            if value.chars().count() > MAX_SUMMARY_TEXT_LENGTH {
+                return Err(DocumentValidationError::UnsafeString);
+            }
+            safe_string(value)
+        }
+        DashboardSummaryValue::Number(value) if !value.is_finite() => {
+            Err(DocumentValidationError::NonFiniteNumber)
+        }
+        DashboardSummaryValue::Number(_) | DashboardSummaryValue::Boolean(_) => Ok(()),
     }
 }
 

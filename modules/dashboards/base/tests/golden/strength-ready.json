@@ -11,6 +11,9 @@
           "value": {
             "sessions": 4
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -24,6 +27,9 @@
           "value": {
             "sessions": 4
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -37,6 +43,9 @@
           "value": {
             "sets": 24
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -50,6 +59,9 @@
           "value": {
             "sets": 24
           }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },

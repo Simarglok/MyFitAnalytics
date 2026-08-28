@@ -62,6 +62,6 @@
       <span>{message('dashboard.coverage')}: {formatNumber(page.coverage.observedDays, locale)} / {formatNumber(page.coverage.expectedDays, locale)}</span>
       <span>{page.coverage.sufficient ? 'Sufficient' : 'Limited'}</span>
     </div>
-    <DashboardRenderer document={page.document} availability={page.availability} stale={dashboardStore.state.stale} />
+    <DashboardRenderer document={page.document} availability={page.availability} stale={dashboardStore.state.stale} {locale} />
   {/if}
 </section>

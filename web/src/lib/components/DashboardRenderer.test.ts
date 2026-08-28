@@ -104,6 +104,57 @@ describe("DashboardRenderer", () => {
     unmount(app);
   });
 
+  it("renders a Rust-shaped structured card through its reviewed presentation", () => {
+    const { target, app } = render({
+      title_key: "base.nutrition.title",
+      blocks: [
+        {
+          type: "card",
+          value: {
+            key: "nutrition.calories",
+            label: "base.nutrition.calories",
+            value: {
+              available: true,
+              value: {
+                days: [{ local_date: "2026-01-01", calories_kcal: 2400 }],
+              },
+            },
+            presentation: {
+              summary_key: "base.nutrition.calories",
+              summary_value: 2400,
+            },
+          },
+        },
+      ],
+    });
+
+    expect(target.textContent).toContain("Calories: 2,400");
+    expect(target.textContent).not.toContain("[object Object]");
+    expect(target.textContent).not.toContain('{"available"');
+    unmount(app);
+  });
+
+  it("uses a safe localized fallback instead of rendering an unreviewed object", () => {
+    const { target, app } = render({
+      title_key: "base.body.title",
+      blocks: [
+        {
+          type: "card",
+          value: {
+            key: "body.raw_weight",
+            label: "base.body.raw_weight",
+            value: { available: true, value: { private_metric: 82.5 } },
+          },
+        },
+      ],
+    });
+
+    expect(target.textContent).toContain("Not available");
+    expect(target.textContent).not.toContain("private_metric");
+    expect(target.textContent).not.toContain("{");
+    unmount(app);
+  });
+
   it("decodes the Rust-shaped typed module error as a safe error panel", () => {
     const { target, app } = render({
       code: "module_invoke_error",

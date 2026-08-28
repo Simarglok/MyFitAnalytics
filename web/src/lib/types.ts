@@ -14,6 +14,13 @@ export interface AvailabilityView {
   requiredDependencies: string[];
 }
 
+export type DashboardSummaryValue = string | number | boolean;
+
+export interface DashboardCardPresentation {
+  summaryKey: string;
+  summaryValue?: DashboardSummaryValue | null;
+}
+
 export type ChartPoint = [label: string, value: number | null];
 
 export interface ChartSeries {
@@ -25,6 +32,7 @@ export interface DashboardCard {
   key: string;
   label: string;
   value: unknown;
+  presentation?: DashboardCardPresentation;
 }
 
 export interface DashboardTable {

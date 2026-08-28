@@ -15,24 +15,12 @@ pub(crate) async fn invoke(
     input: DashboardInput,
     limits: RuntimeLimits,
 ) -> Result<DashboardDocument, RuntimeError> {
-    let manifest = match &module.manifest {
-        ModuleManifest::Dashboard(manifest) => manifest,
-        _ => {
-            return Err(RuntimeError::new(
-                "module_type_mismatch",
-                "dashboard invocation requires a dashboard manifest",
-            ));
-        }
+    let ModuleManifest::Dashboard(_) = &module.manifest else {
+        return Err(RuntimeError::new(
+            "module_type_mismatch",
+            "dashboard invocation requires a dashboard manifest",
+        ));
     };
-    for requirement in &manifest.required_capabilities {
-        if !input.capabilities.contains_key(&requirement.capability) {
-            return Err(RuntimeError::new(
-                "missing_capability_input",
-                format!("missing capability {}", requirement.capability),
-            ));
-        }
-    }
-
     let state = DashboardStoreState {
         limits: wasmtime::StoreLimitsBuilder::new()
             .memory_size(limits.max_memory_bytes)

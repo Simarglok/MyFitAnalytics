@@ -18,6 +18,9 @@
               "value": 82.3
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -38,6 +41,9 @@
               "value": 82.3
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -58,6 +64,9 @@
               "value": 82.3
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },
@@ -78,6 +87,9 @@
               "value": 82.3
             }
           ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
         }
       }
     },

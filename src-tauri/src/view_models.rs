@@ -1,6 +1,6 @@
 use mfa_contracts::{AvailabilityState, DashboardBlock, LocalDate};
 use mfa_dashboard_host::DashboardOutput;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -36,12 +36,56 @@ impl DateRangeView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AvailabilityView {
+    #[serde(
+        serialize_with = "serialize_availability_state",
+        deserialize_with = "deserialize_availability_state"
+    )]
     pub state: AvailabilityState,
     pub reason_key: String,
     pub required_capabilities: Vec<String>,
     pub required_dependencies: Vec<String>,
     pub freshness: mfa_dashboard_host::Freshness,
     pub action: Option<String>,
+}
+
+fn serialize_availability_state<S>(
+    state: &AvailabilityState,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    availability_state_name(state).serialize(serializer)
+}
+
+fn deserialize_availability_state<'de, D>(deserializer: D) -> Result<AvailabilityState, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match String::deserialize(deserializer)?.as_str() {
+        "missing_capability" => Ok(AvailabilityState::MissingCapability),
+        "missing_dependency" => Ok(AvailabilityState::MissingDependency),
+        "incompatible_contract" => Ok(AvailabilityState::IncompatibleContract),
+        "waiting_for_data" => Ok(AvailabilityState::WaitingForData),
+        "insufficient_coverage" => Ok(AvailabilityState::InsufficientCoverage),
+        "ready" => Ok(AvailabilityState::Ready),
+        "disabled_by_user" => Ok(AvailabilityState::DisabledByUser),
+        value => Err(serde::de::Error::custom(format!(
+            "unknown availability state: {value}"
+        ))),
+    }
+}
+
+fn availability_state_name(state: &AvailabilityState) -> &'static str {
+    match state {
+        AvailabilityState::MissingCapability => "missing_capability",
+        AvailabilityState::MissingDependency => "missing_dependency",
+        AvailabilityState::IncompatibleContract => "incompatible_contract",
+        AvailabilityState::WaitingForData => "waiting_for_data",
+        AvailabilityState::InsufficientCoverage => "insufficient_coverage",
+        AvailabilityState::Ready => "ready",
+        AvailabilityState::DisabledByUser => "disabled_by_user",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

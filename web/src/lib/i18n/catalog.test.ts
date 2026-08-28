@@ -29,6 +29,24 @@ describe("English UI catalog", () => {
     expect(missing).toEqual([]);
   });
 
+  it("enumerates the reviewed base dashboard localization keys", () => {
+    const required = [
+      "base.nutrition.macros",
+      "base.nutrition.trailing_mean",
+      "base.nutrition.tdee",
+      "base.activity.events",
+      "base.activity.water",
+      "base.body.phase_overlay",
+      "base.sources.modules",
+      "base.sources.snapshots",
+      "base.card_available",
+    ];
+    const missing = required.filter(
+      (key) => !catalog.catalogKeys().includes(key),
+    );
+    expect(missing).toEqual([]);
+  });
+
   it("uses a visible marker instead of silently hiding a missing key", () => {
     expect(catalog.translate("dashboard.not_in_catalog")).toBe(
       "⟦dashboard.not_in_catalog⟧",
