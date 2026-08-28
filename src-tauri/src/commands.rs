@@ -619,7 +619,6 @@ pub async fn get_dashboard_inner(
                     mfa_module_host::RuntimeLimits::default(),
                 )
                 .await
-                .map(|document| document)
                 .map_err(|error| error.code().to_owned()),
             &dashboard.input,
             &base_localization_keys(),

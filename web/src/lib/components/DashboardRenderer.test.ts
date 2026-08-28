@@ -110,7 +110,9 @@ describe("DashboardRenderer", () => {
       messageKey: "dashboard.module_error.module_invoke_error",
     });
 
-    expect(target.querySelector('[data-module-error="module_invoke_error"]')).not.toBeNull();
+    expect(
+      target.querySelector('[data-module-error="module_invoke_error"]'),
+    ).not.toBeNull();
     expect(target.querySelector('[role="alert"]')).not.toBeNull();
     expect(target.querySelectorAll("script")).toHaveLength(0);
     expect(target.textContent).not.toContain("Dashboard content unavailable");

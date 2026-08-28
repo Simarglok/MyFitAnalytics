@@ -88,10 +88,10 @@ pub fn validate_document(
                     point_count = point_count.saturating_add(series.points.len());
                     for (label, value) in &series.points {
                         safe_string(label)?;
-                        if let Some(value) = value {
-                            if !value.is_finite() {
-                                return Err(DocumentValidationError::NonFiniteNumber);
-                            }
+                        if let Some(value) = value
+                            && !value.is_finite()
+                        {
+                            return Err(DocumentValidationError::NonFiniteNumber);
                         }
                     }
                 }
