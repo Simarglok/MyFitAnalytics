@@ -4,15 +4,19 @@ MyFitAnalytics is a local-first, private workspace for personal fitness analytic
 
 ## Status
 
-Plan 4 (analytics and dashboard UI) is complete at product scope. Final
-post-correction packaged-native macOS acceptance was completed by the manager
-against code/artifact baseline
-`74697bc0b851b7ef75d5369c189174e246e735b6`. Its non-foreground
-production-path gate is green. The repository includes the Rust workspace,
-shared versioned contracts, module package validation and installation,
-Storage/Ingestion, bundled Hevy and MyNetDiary source modules, deterministic
-base analytics, a sandboxed Wasm component host, capability/provider
-resolution, locale fallback, and a typed Tauri-to-Svelte dashboard shell.
+Plan 4 (analytics and dashboard UI) is complete at product scope. At the
+authoritative current HEAD
+`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`, the mandatory Rust/web gates,
+deterministic module/package checks, and fresh app/DMG build checks are green.
+Packaged-native macOS acceptance remains Draft/INCOMPLETE: a fresh launch showed
+a visible 1200x800 window with no crash in process/WebKit logs, but CuaDriver
+lacks Accessibility and Screen Recording permissions, so no interactive
+assertions or screenshots are validly claimed. The repository includes the Rust
+workspace, shared versioned contracts, module package validation and
+installation, Storage/Ingestion, bundled Hevy and MyNetDiary source modules,
+deterministic base analytics, a sandboxed Wasm component host,
+capability/provider resolution, locale fallback, and a typed Tauri-to-Svelte
+dashboard shell.
 
 The backend supplies the initial dashboard window as an inclusive 31-day range
 ending at the latest available observation, or at the current local date when
@@ -20,13 +24,13 @@ no observation exists; the frontend does not invent a production date default.
 
 Task 7's automated gate and the packaged-native acceptance use only checked-in
 synthetic MyNetDiary and Hevy fixtures, isolated temporary roots, and the
-application command services. Subsequent branch changes since the accepted
-code/artifact baseline have been documentation-only; no product code, tests,
-configuration, or packaged artifact changed after that acceptance. Plan 5
-(desktop lifecycle, tray/background behavior, and release packaging) remains
-deferred and out of scope. Local macOS `.app` and DMG bundles, when built, are
-development validation artifacts; notarization and publishing remain deferred,
-out of scope, and unclaimed.
+application command services. The current packaged-native acceptance is
+incomplete until CuaDriver Accessibility and Screen Recording are granted, the
+full fresh acceptance is rerun, native evidence is updated, and final Terra
+review is obtained. Plan 5 (desktop lifecycle, tray/background behavior, and
+release packaging) remains deferred and out of scope. Local macOS `.app` and DMG
+bundles, when built, are development validation artifacts; notarization and
+publishing remain deferred, out of scope, and unclaimed.
 
 ## Architecture
 

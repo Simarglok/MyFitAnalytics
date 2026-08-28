@@ -3,11 +3,13 @@
 ## Scope
 
 This file records the Plan 4 analytics/dashboard work, its non-foreground
-production-path gate, the historical pre-correction packaged native acceptance,
-and the final post-correction packaged native acceptance recorded below. The
-Task 7 gate, the serialized workspace suite, and both native acceptance runs
-were green within their stated boundaries. Plan 5 (desktop lifecycle,
-tray/background behavior, and release distribution) remains deferred.
+production-path gate, historical packaged-native acceptance, and the current
+HEAD verification status. The automated Rust/web gates, deterministic package
+checks, and fresh app/DMG build checks are green at the current HEAD. Current
+packaged-native acceptance remains Draft/INCOMPLETE because CuaDriver lacks
+Accessibility and Screen Recording permissions, so no interactive assertions or
+screenshots are validly claimed. Plan 5 (desktop lifecycle, tray/background
+behavior, and release distribution) remains deferred.
 Native acceptance used a fresh isolated test profile and checked-in synthetic
 fixtures only; no real export, iCloud workspace, credential, or remote
 operation is part of this evidence.
@@ -336,16 +338,14 @@ personal exports or real workspace were read, and no remote mutation occurred.
 This round addresses the Terra High findings discovered after the packaged
 acceptance above. It changes runtime and UI behavior, so the packaged/native
 results in Correction round 4 remain historical pre-correction evidence. The
-final post-correction package/native acceptance against the code/artifact
-baseline recorded in the final section below supersedes the earlier
-pending-rerun statement.
-This file does not reinterpret the historical Correction round 4 results.
+current HEAD packaged-native acceptance is recorded in the current status
+section below and remains Draft/INCOMPLETE. This file does not reinterpret the
+historical Correction round 4 results.
 
 In particular, the earlier `Coverage 1/31 Limited` and `Data is ready` pairing
 is retained only as a historical pre-correction capture; it is not the
-corrected availability behavior. The final post-correction packaged-native
-acceptance for the code/artifact baseline recorded in the final section below
-is now available.
+corrected availability behavior. The current HEAD packaged-native acceptance
+is not Ready; its exact blocker is recorded in the current status section below.
 
 The scoped corrections are:
 
@@ -393,8 +393,8 @@ backend returned the inclusive 31-day initial range `2026-01-04` through
 for the local-date fallback branch.
 
 The correction-round focused tests use checked-in synthetic fixtures or
-injected dates only. They do not constitute the packaged/native acceptance
-recorded in the final section below.
+injected dates only. They do not constitute the current packaged/native
+acceptance recorded below.
 
 ## Safety and truthfulness boundary
 
@@ -405,24 +405,22 @@ recorded in the final section below.
 - `entrypoint_hash` is a SHA-256 integrity/digest check, not publisher signing.
   Release signing and notarization are separate packaging controls. The
   pre-correction Plan 4 packaged native acceptance is historical as recorded
-  above, and the final post-correction package/native acceptance is green as
-  recorded below. The accepted app was ad-hoc signed; notarization was not
-  performed, and Plan 5 remains deferred.
+  above. Current packaged-native acceptance remains Draft/INCOMPLETE because
+  CuaDriver lacks Accessibility and Screen Recording permissions. The fresh
+  app was ad-hoc signed; notarization was not performed, and Plan 5 remains
+  deferred.
 - The gate is serial and uses one actor-owned database connection.
 - README status and `docs/dashboard-module-authoring.md` intentionally separate
   completed Plan 4 from deferred Plan 5.
 
-## Final post-correction packaged native acceptance — artifact baseline
+## Historical post-correction packaged native acceptance — prior artifact baseline
 
-Fresh packaged-native acceptance was completed against the code/artifact
+Packaged-native acceptance was previously recorded against the code/artifact
 baseline `74697bc0b851b7ef75d5369c189174e246e735b6`, which was the code branch
-tip at acceptance time. The branch tip and final repository state differ from
-that artifact baseline only by subsequent evidence-only documentation
-amendments to this file. No product code, tests, configuration, or packaged
-artifact changed, and the artifact was not rebuilt from those documentation-only
-amendments. This supersedes the stale post-correction-rerun-pending statements
-in earlier versions of this evidence file. It records the final allowed
-correction result; Plan 5 and notarization remain out of scope.
+tip at that time. This section is historical and is not the current HEAD
+acceptance status. No product code, tests, configuration, or packaged artifact
+claims in this historical section are reclassified by the current Draft status.
+Plan 5 and notarization remain out of scope.
 
 ### Packaging and artifact verification
 
@@ -493,3 +491,73 @@ profile was restored.
 - Prettier and `git diff --check` were clean.
 - The same Rust tree had already passed full `cargo test`, Clippy, rustfmt,
   and the production dashboard gate. This final correction was frontend-only.
+
+## Current HEAD verification status — Draft
+
+Authoritative current HEAD is
+`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`. The implementation and automated
+verification are complete within their stated boundaries, but packaged-native
+acceptance is **Draft/INCOMPLETE**. Ready is not claimed.
+
+### Implemented
+
+- Focused ingestion RED/GREEN coverage proves that repeated refreshes of one
+  failed asset remain one current attention item, and that successful
+  processing clears the attention item and its failure-code count.
+- The ingestion/UI boundary carries privacy-safe identity and reason data,
+  deterministic failure-code counts, deterministic pending-module names, and
+  localized Open Settings behavior. No raw paths or source content are
+  surfaced, and no auto-update behavior is implemented.
+- The dashboard/source gates passed. Deterministic package SHA-256 values are:
+
+  | Package           | SHA-256                                                            |
+  | ----------------- | ------------------------------------------------------------------ |
+  | MyNetDiary source | `79a8c96594a95e508fc5cae95057323528d3f180af9e8f3c25bf472b635fc56c` |
+  | Hevy source       | `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379` |
+  | Base dashboard    | `13a11f972e93c8bfd51b6e371fb8cef62f45a0887bb4339b1f0b93badf89d901` |
+
+- The full mandatory Rust/web gates passed on this HEAD: workspace Rust tests,
+  `mfa-ingestion` and `myfitanalytics` Clippy with `-D warnings`, rustfmt,
+  frontend Vitest, Svelte check, frontend build, and diff checking. Svelte
+  check reported 0 errors and the two already-known `AppShell` warnings.
+  Playwright passed 5/5 using lockfile package `1.62.1` and an exact browser
+  installed in a session-owned `/private/tmp` cache.
+- Fresh app and DMG packaging passed. The executable SHA-256 is
+  `0b66ca53e055dc6101815e9b7516689c44f12a51fa7d492fa88735894812a611`; the
+  DMG SHA-256 is
+  `45a859450ebcb890c22bd91ac681955ad7363ccdd1d637f1370d048b9a64fdc4`.
+  The production allowlist contained exactly three module files, and package
+  hashes matched `dist`. The signing verifier, strict `codesign`, entitlements
+  validation, and `hdiutil verify` all passed.
+- The checked-in synthetic-fixture privacy verifier passed for 7 BIFF fixtures
+  and 2 CSV fixtures. Secret/privacy scans reported no new-change findings.
+- Residual `event_failures` belongs only to the test-only fault-injection path.
+  Production `PipelineState` uses `NoFaultInjector`, whose `check` always
+  returns `Ok`; it is not a source of repeated Refresh count.
+- A fresh packaged-native launch showed a visible 1200x800 window and no crash
+  in process or WebKit logs. The six guarded profile roots were restored
+  hash-identically, the guard reported every row restored, and the app process
+  is absent.
+
+### Not implemented
+
+- Valid interactive packaged-native assertions and synthetic-only screenshots
+  were not gathered. CuaDriver lacked both Accessibility and Screen Recording,
+  so native UI observations could not be validly collected.
+- Final Ready status and final Terra approval are not claimed.
+
+### Remaining work
+
+1. Grant CuaDriver Accessibility and Screen Recording permissions.
+2. Rerun the full fresh packaged-native acceptance against the current
+   artifact baseline.
+3. Update the native evidence with valid interactive observations and
+   synthetic-only screenshots.
+4. Obtain final Terra review.
+
+### Blockers
+
+The exact blocker is missing CuaDriver Accessibility and Screen Recording
+permissions. Until both are granted, packaged-native acceptance remains
+Draft/INCOMPLETE. Plan 5 remains out of scope, and remote push, PR update, and
+merge are not authorized.
