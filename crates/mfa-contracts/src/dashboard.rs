@@ -26,6 +26,8 @@ pub enum AvailabilityState {
 pub struct DashboardInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability_state: Option<AvailabilityState>,
     #[serde(default)]
     pub capabilities: BTreeMap<CapabilityId, Value>,
     #[serde(default)]

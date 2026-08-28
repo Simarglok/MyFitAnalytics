@@ -137,6 +137,7 @@ async fn resolver_requires_all_declared_namespaces_and_exact_compatible_versions
 
     let _empty = DashboardInput {
         page_id: None,
+        availability_state: None,
         capabilities: BTreeMap::new(),
         extensions: BTreeMap::new(),
     };

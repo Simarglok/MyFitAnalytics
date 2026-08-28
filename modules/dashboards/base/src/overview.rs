@@ -3,7 +3,10 @@ use mfa_contracts::{
 };
 use serde_json::Value;
 
-use crate::{card, chart, has_capability, status, value_or_missing};
+use crate::{
+    availability_message_key, card, chart, has_capability, page_availability_state, status,
+    value_or_missing,
+};
 
 pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
     let body_value = value_or_missing(input, "body.weight", "base.overview.body_weight");
@@ -12,6 +15,14 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
         && has_capability(input, "nutrition.items")
         && has_capability(input, "activity.days")
         && has_capability(input, "strength.sessions");
+    let availability_state = page_availability_state(
+        input,
+        if all_ready {
+            AvailabilityState::Ready
+        } else {
+            AvailabilityState::MissingCapability
+        },
+    );
     vec![
         card(
             "overview.body_weight",
@@ -32,16 +43,12 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
         ),
         status(
             "overview.quality",
-            if all_ready {
-                AvailabilityState::Ready
-            } else {
-                AvailabilityState::MissingCapability
-            },
-            if all_ready {
-                "base.overview.quality_ready"
-            } else {
-                "base.body.missing"
-            },
+            availability_state.clone(),
+            availability_message_key(
+                &availability_state,
+                "base.overview.quality_ready",
+                "base.body.missing",
+            ),
         ),
     ]
 }

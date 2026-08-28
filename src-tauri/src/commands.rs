@@ -4,7 +4,7 @@ use crate::view_models::{
     AvailabilityView, CoverageView, DashboardPageView, DateRangeView, FreshnessView,
     NavigationItemView, NavigationView, PhaseEventInput, PhaseEventView, ProviderView,
 };
-use chrono::Utc;
+use chrono::{Local, Utc};
 use mfa_analytics::{
     DateRange, MetricContext, WeightObservation, activity_analytics, body_fat_analytics,
     excluded_dates, nutrition_analytics, rolling_tdee_with_context, strength_analytics,
@@ -227,7 +227,10 @@ pub async fn list_module_catalog_inner(
             .or(bundled_error);
         let available_version = inspected.as_ref().and_then(|package| {
             let version = manifest_version(&package.manifest);
-            (*version > module.module_version).then(|| version.to_string())
+            let version_is_newer = *version > module.module_version;
+            let same_version_hash_changed =
+                *version == module.module_version && package.package_hash != module.package_hash;
+            (version_is_newer || same_version_hash_changed).then(|| version.to_string())
         });
         let install_state = catalog_install_state(
             inspect_error.as_deref(),
@@ -526,29 +529,55 @@ const BASE_DASHBOARD_PAGES: [(&str, &str); 6] = [
 ];
 
 pub async fn get_navigation_inner(state: &AppState) -> Result<NavigationView, CommandError> {
-    let requested = DateRangeView::synthetic_default()
+    get_navigation_inner_at(state, Local::now().date_naive().into()).await
+}
+
+pub async fn get_navigation_inner_at(
+    state: &AppState,
+    local_today: mfa_contracts::LocalDate,
+) -> Result<NavigationView, CommandError> {
+    let fallback_view = DateRangeView::initial(None, local_today);
+    let fallback = fallback_view
         .parse()
         .map(|(start, end)| DateRange { start, end })
         .map_err(|detail| command_error("invalid_date_range", &detail))?;
-    let availability = match state
+    let (availability, initial_range) = match state
         .modules()
         .into_iter()
         .find(|module| module.module_id.as_str() == "base")
     {
         Some(module) => match &module.manifest {
             ModuleManifest::Dashboard(manifest) => {
-                dashboard_input(
+                let probe = dashboard_input(
                     state,
-                    &requested,
+                    &fallback,
                     "overview",
                     &manifest.required_capabilities,
                 )
-                .await?
-                .availability
+                .await?;
+                let initial_range =
+                    DateRangeView::initial(probe.latest_observation_date, local_today);
+                let requested = initial_range
+                    .parse()
+                    .map(|(start, end)| DateRange { start, end })
+                    .map_err(|detail| command_error("invalid_date_range", &detail))?;
+                let availability = if requested == fallback {
+                    probe.availability
+                } else {
+                    dashboard_input(
+                        state,
+                        &requested,
+                        "overview",
+                        &manifest.required_capabilities,
+                    )
+                    .await?
+                    .availability
+                };
+                (availability, initial_range)
             }
-            _ => missing_dashboard_availability("base"),
+            _ => (missing_dashboard_availability("base"), fallback_view),
         },
-        None => missing_dashboard_availability("base"),
+        None => (missing_dashboard_availability("base"), fallback_view),
     };
     let items = BASE_DASHBOARD_PAGES
         .into_iter()
@@ -560,7 +589,10 @@ pub async fn get_navigation_inner(state: &AppState) -> Result<NavigationView, Co
             availability: availability.clone(),
         })
         .collect();
-    Ok(NavigationView { items })
+    Ok(NavigationView {
+        items,
+        initial_range,
+    })
 }
 
 pub async fn get_dashboard_inner(
@@ -1135,12 +1167,14 @@ async fn dashboard_input(
         observed_days,
         requested,
     );
+    let input = DashboardInput {
+        page_id: Some(page_id.to_owned()),
+        availability_state: Some(availability.state.clone()),
+        capabilities,
+        extensions: BTreeMap::new(),
+    };
     Ok(DashboardInputResult {
-        input: DashboardInput {
-            page_id: Some(page_id.to_owned()),
-            capabilities,
-            extensions: BTreeMap::new(),
-        },
+        input,
         latest_observation_date: observed_dates.iter().next_back().copied(),
         availability,
         coverage,
@@ -1326,6 +1360,12 @@ fn base_localization_keys() -> BTreeSet<String> {
         "sources.quality",
         "sources.ready",
         "sources.missing",
+        "state.missing_capability",
+        "state.missing_dependency",
+        "state.incompatible_contract",
+        "state.waiting_for_data",
+        "state.insufficient_coverage",
+        "state.disabled_by_user",
     ]
     .into_iter()
     .map(|key| format!("base.{key}"))
@@ -1859,6 +1899,21 @@ pub async fn save_phase_event(
     state: tauri::State<'_, AppState>,
 ) -> Result<PhaseEventView, CommandError> {
     save_phase_event_inner(input, &state).await
+}
+
+#[tauri::command]
+pub async fn list_phase_events(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<PhaseEventView>, CommandError> {
+    list_phase_events_inner(&state).await
+}
+
+#[tauri::command]
+pub async fn delete_phase_event(
+    phase_event_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError> {
+    delete_phase_event_inner(phase_event_id, &state).await
 }
 
 #[tauri::command]

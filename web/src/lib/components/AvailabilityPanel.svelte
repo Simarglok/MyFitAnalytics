@@ -3,6 +3,7 @@
   import { message } from '../i18n';
 
   export let availability: AvailabilityView | null = null;
+  export let onAction: ((action: string) => void) | undefined = undefined;
 
   const labels: Record<string, string> = {
     missing_capability: 'dashboard.state.missing_capability',
@@ -14,8 +15,19 @@
     disabled_by_user: 'dashboard.state.disabled_by_user',
   };
 
+  const actionLabels: Record<string, string> = {
+    'dashboard.action.configure_source': 'Configure source',
+    'dashboard.action.import_data': 'Import data',
+    'dashboard.action.enable': 'Enable module',
+    'dashboard.action.update_module': 'Update module',
+  };
+  const actionable = new Set(Object.keys(actionLabels));
+
   $: stateLabel = availability ? message(labels[availability.state] ?? availability.state) : '';
   $: reasonLabel = availability ? message(availability.reasonKey, availability.reasonKey) : '';
+  $: actionLabel = availability?.action
+    ? message(availability.action, actionLabels[availability.action] ?? availability.action)
+    : '';
 </script>
 
 {#if availability}
@@ -28,6 +40,19 @@
     {/if}
     {#if availability.requiredDependencies.length > 0}
       <span>{message('dashboard.required_dependencies')}: {availability.requiredDependencies.join(', ')}</span>
+    {/if}
+    {#if availability.action}
+      {#if actionable.has(availability.action) && onAction}
+        <button
+          type="button"
+          data-availability-action={availability.action}
+          on:click={() => onAction?.(availability.action as string)}
+        >{actionLabel}</button>
+      {:else}
+        <span data-availability-guidance={availability.action}>
+          {message('dashboard.action.guidance')}: {actionLabel}
+        </span>
+      {/if}
     {/if}
   </aside>
 {/if}

@@ -12,6 +12,7 @@ fn capability(name: &str) -> CapabilityId {
 fn ready_input() -> DashboardInput {
     DashboardInput {
         page_id: None,
+        availability_state: None,
         capabilities: BTreeMap::from([
             (
                 capability("body.weight"),
@@ -58,9 +59,16 @@ fn ready_input() -> DashboardInput {
 fn empty_input() -> DashboardInput {
     DashboardInput {
         page_id: None,
+        availability_state: None,
         capabilities: BTreeMap::new(),
         extensions: BTreeMap::new(),
     }
+}
+
+fn insufficient_coverage_input() -> DashboardInput {
+    let mut input = ready_input();
+    input.availability_state = Some(AvailabilityState::InsufficientCoverage);
+    input
 }
 
 fn block_keys(document: &DashboardDocument) -> Vec<String> {
@@ -178,6 +186,30 @@ fn missing_page_inputs_keep_graphs_visible_with_exact_state() {
 }
 
 #[test]
+fn non_ready_availability_is_not_reported_as_ready_by_any_page() {
+    for page in [
+        BasePage::Overview,
+        BasePage::Body,
+        BasePage::Nutrition,
+        BasePage::Activity,
+        BasePage::Strength,
+        BasePage::Sources,
+    ] {
+        let document = compose_page(page, &insufficient_coverage_input());
+        let status = document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                DashboardBlock::StatusPanel(panel) => Some(panel),
+                _ => None,
+            })
+            .expect("page availability status");
+        assert_eq!(status.state, AvailabilityState::InsufficientCoverage);
+        assert!(!status.message_key.ends_with(".ready"));
+    }
+}
+
+#[test]
 fn wit_adapter_describes_base_and_selects_requested_page() {
     let description: serde_json::Value = serde_json::from_str(&describe_module()).unwrap();
     assert_eq!(description["module_id"], "base");
@@ -193,9 +225,22 @@ fn wit_adapter_describes_base_and_selects_requested_page() {
 }
 
 #[test]
+fn compose_json_ignores_the_ungrantable_dashboard_page_capability() {
+    let mut input = serde_json::to_value(empty_input()).unwrap();
+    input["capabilities"] = json!({"dashboard.page": "body"});
+
+    let document: DashboardDocument =
+        serde_json::from_str(&compose_json(&serde_json::to_string(&input).unwrap()).unwrap())
+            .unwrap();
+
+    assert_eq!(document.title_key, "base.overview.title");
+}
+
+#[test]
 fn chart_extracts_object_dataset_points_and_preserves_gaps() {
     let input = DashboardInput {
         page_id: None,
+        availability_state: None,
         capabilities: BTreeMap::from([(
             capability("body.weight"),
             json!({
@@ -233,6 +278,7 @@ fn chart_extracts_object_dataset_points_and_preserves_gaps() {
 fn activity_cards_use_their_declared_capabilities_independently() {
     let input = DashboardInput {
         page_id: Some("activity".to_owned()),
+        availability_state: None,
         capabilities: BTreeMap::from([
             (
                 capability("activity.days"),
@@ -266,6 +312,7 @@ fn activity_cards_use_their_declared_capabilities_independently() {
 fn body_page_renders_optional_body_fat_series_without_weight_substitution() {
     let input = DashboardInput {
         page_id: Some("body".to_owned()),
+        availability_state: None,
         capabilities: BTreeMap::from([
             (
                 capability("body.weight"),

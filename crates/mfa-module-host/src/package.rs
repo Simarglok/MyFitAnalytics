@@ -542,7 +542,11 @@ impl PackageInstaller {
             .map(|package| self.inspect(package).map(|value| (package, value)))
             .collect::<Result<Vec<_>, _>>()?;
         let mut state = load_state(&self.store_root)?;
-        for (_, package) in &inspected {
+        let previous_catalog = state.bundled_catalog.clone();
+        let installed = self.current_registry()?;
+        state = load_state(&self.store_root)?;
+        let mut packages_to_activate = Vec::new();
+        for (path, package) in &inspected {
             let (module_id, module_version, _) = manifest_identity(&package.manifest);
             state.bundled_catalog.insert(
                 module_id.to_string(),
@@ -551,21 +555,38 @@ impl PackageInstaller {
                     package_hash: package.package_hash.clone(),
                 },
             );
-        }
-        save_state(&self.store_root, &state)?;
-        let installed = self.current_registry()?;
-        for (path, package) in inspected {
-            let (module_id, _, _) = manifest_identity(&package.manifest);
             let explicitly_disabled = state
                 .modules
                 .get(module_id.as_str())
                 .is_some_and(|enabled| !enabled);
-            let already_installed = installed
+            let explicitly_uninstalled = state.uninstalled_modules.contains(module_id.as_str());
+            let active = installed
                 .iter()
-                .any(|module| &module.module_id == module_id);
-            if !explicitly_disabled && !already_installed {
-                self.install(path)?;
+                .find(|module| module.module_id == *module_id);
+            let prior_bundled = previous_catalog.get(module_id.as_str());
+            let active_matches_prior_bundled = active.is_some_and(|active| {
+                prior_bundled.is_some_and(|prior| {
+                    prior.module_version == active.module_version.to_string()
+                        && prior.package_hash == active.package_hash
+                })
+            });
+            let same_version_hash_changed = active.is_some_and(|active| {
+                active.module_version == *module_version
+                    && active.package_hash != package.package_hash
+            });
+            let should_auto_activate = !explicitly_disabled
+                && !explicitly_uninstalled
+                && active_matches_prior_bundled
+                && same_version_hash_changed;
+            let should_install_default =
+                !explicitly_disabled && !explicitly_uninstalled && active.is_none();
+            if should_auto_activate || should_install_default {
+                packages_to_activate.push(*path);
             }
+        }
+        save_state(&self.store_root, &state)?;
+        for path in packages_to_activate {
+            self.install(path)?;
         }
         self.bundled_catalog()
     }
@@ -595,10 +616,12 @@ impl PackageInstaller {
                         module_version: module.module_version.clone(),
                         package_hash: module.package_hash.clone(),
                     });
-                if installed
-                    .as_ref()
-                    .is_some_and(|installed| installed.module_version >= available.module_version)
-                {
+                let installed_matches_available = installed.as_ref().is_some_and(|installed| {
+                    installed.module_version > available.module_version
+                        || (installed.module_version == available.module_version
+                            && installed.package_hash == available.package_hash)
+                });
+                if installed_matches_available {
                     None
                 } else {
                     Some(BundledModuleUpdate {

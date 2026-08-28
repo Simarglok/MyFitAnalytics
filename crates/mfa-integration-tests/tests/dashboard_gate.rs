@@ -325,7 +325,10 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
             let _overview = get_dashboard_inner(
                 "base".to_owned(),
                 "overview".to_owned(),
-                DateRangeView::synthetic_default(),
+                DateRangeView {
+                    start: "2026-01-01".to_owned(),
+                    end: "2026-01-31".to_owned(),
+                },
                 &app,
             )
             .await
@@ -444,6 +447,13 @@ async fn production_dashboard_gate_imports_fixtures_and_queries_every_base_page(
         end: expected["dateRange"]["end"].as_str().unwrap().to_owned(),
     };
     let navigation = get_navigation_inner(&app).await.unwrap();
+    assert_eq!(
+        navigation.initial_range,
+        DateRangeView {
+            start: "2026-01-04".to_owned(),
+            end: "2026-02-03".to_owned(),
+        }
+    );
     assert_eq!(
         navigation
             .items

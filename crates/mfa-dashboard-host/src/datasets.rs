@@ -49,6 +49,7 @@ impl DatasetResolver {
     ) -> Result<DashboardInput, DashboardError> {
         let mut input = DashboardInput {
             page_id: None,
+            availability_state: None,
             capabilities: BTreeMap::new(),
             extensions: BTreeMap::new(),
         };

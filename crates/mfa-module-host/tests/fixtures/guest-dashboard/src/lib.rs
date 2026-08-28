@@ -16,6 +16,18 @@ impl Guest for Component {
         if input_json.contains("malformed") {
             return Ok("not-json".to_owned());
         }
+        if input_json.contains("raw-top-level-unknown") {
+            return Ok(r#"{"title_key":"dashboard.guest.title","blocks":[],"onClick":"bad"}"#.to_owned());
+        }
+        if input_json.contains("raw-block-on-click") {
+            return Ok(r#"{"title_key":"dashboard.guest.title","blocks":[{"type":"card","value":{"key":"weight","label":"dashboard.guest.weight","value":82.5},"onClick":"bad"}]}"#.to_owned());
+        }
+        if input_json.contains("raw-block-html") {
+            return Ok(r#"{"title_key":"dashboard.guest.title","blocks":[{"type":"card","value":{"key":"weight","label":"dashboard.guest.weight","value":82.5},"html":"bad"}]}"#.to_owned());
+        }
+        if input_json.contains("raw-block-url") {
+            return Ok(r#"{"title_key":"dashboard.guest.title","blocks":[{"type":"card","value":{"key":"weight","label":"dashboard.guest.weight","value":82.5},"url":"https://example.invalid"}]}"#.to_owned());
+        }
         Ok(r#"{"title_key":"dashboard.guest.title","blocks":[{"type":"card","value":{"key":"weight","label":"dashboard.guest.weight","value":82.5}}]}"#.to_owned())
     }
 }

@@ -77,12 +77,6 @@ pub fn compose_json(input_json: &str) -> Result<String, String> {
     let page = raw
         .get("page_id")
         .and_then(Value::as_str)
-        .or_else(|| {
-            raw.get("capabilities")
-                .and_then(Value::as_object)
-                .and_then(|capabilities| capabilities.get("dashboard.page"))
-                .and_then(Value::as_str)
-        })
         .unwrap_or("overview");
     let page = BasePage::parse(page).ok_or_else(|| "unknown_page".to_owned())?;
     let input: DashboardInput =
@@ -109,6 +103,29 @@ pub(crate) fn has_capability(input: &DashboardInput, name: &str) -> bool {
         .capabilities
         .keys()
         .any(|capability| capability.as_str() == name)
+}
+
+pub(crate) fn page_availability_state(
+    input: &DashboardInput,
+    fallback: AvailabilityState,
+) -> AvailabilityState {
+    input.availability_state.clone().unwrap_or(fallback)
+}
+
+pub(crate) fn availability_message_key<'a>(
+    state: &AvailabilityState,
+    ready_key: &'a str,
+    missing_key: &'a str,
+) -> &'a str {
+    match state {
+        AvailabilityState::Ready => ready_key,
+        AvailabilityState::MissingCapability => missing_key,
+        AvailabilityState::MissingDependency => "base.state.missing_dependency",
+        AvailabilityState::IncompatibleContract => "base.state.incompatible_contract",
+        AvailabilityState::WaitingForData => "base.state.waiting_for_data",
+        AvailabilityState::InsufficientCoverage => "base.state.insufficient_coverage",
+        AvailabilityState::DisabledByUser => "base.state.disabled_by_user",
+    }
 }
 
 pub(crate) fn value_or_missing(

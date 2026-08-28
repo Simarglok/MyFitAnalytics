@@ -12,6 +12,7 @@ export interface AvailabilityView {
   reasonKey: string;
   requiredCapabilities: string[];
   requiredDependencies: string[];
+  action: string | null;
 }
 
 export type DashboardSummaryValue = string | number | boolean;
@@ -93,6 +94,7 @@ export interface NavigationItemView {
 
 export interface NavigationView {
   items: NavigationItemView[];
+  initialRange: DateRangeView;
 }
 
 export interface DashboardPageView {

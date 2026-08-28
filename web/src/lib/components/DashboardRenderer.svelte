@@ -19,6 +19,7 @@
 
   export let document: unknown;
   export let availability: AvailabilityView | null = null;
+  export let onAvailabilityAction: ((action: string) => void) | undefined = undefined;
   export let stale = false;
   export let locale = 'en-US';
 
@@ -152,6 +153,7 @@
               reasonKey: messageKey,
               requiredCapabilities: [],
               requiredDependencies: [],
+              action: null,
             },
             messageKey,
           },
@@ -241,7 +243,7 @@
   <section class="dashboard-document" aria-labelledby="dashboard-document-title">
     <h2 id="dashboard-document-title">{message(safeOutput.document.titleKey, safeOutput.document.titleKey)}</h2>
     {#if availability}
-      <AvailabilityPanel {availability} />
+      <AvailabilityPanel {availability} onAction={onAvailabilityAction} />
     {/if}
     {#if safeOutput.document.blocks.length === 0}
       <p class="muted">{message('dashboard.no_points')}</p>

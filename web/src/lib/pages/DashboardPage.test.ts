@@ -15,6 +15,7 @@ const item: NavigationItemView = {
     reasonKey: "dashboard.ready",
     requiredCapabilities: [],
     requiredDependencies: [],
+    action: null,
   },
 };
 
@@ -48,7 +49,10 @@ describe("DashboardPage", () => {
     const target = document.createElement("div");
     document.body.append(target);
     const transport = new MockTransport({ dashboards: { overview: page } });
-    const dashboardStore = createDashboardStore(transport);
+    const dashboardStore = createDashboardStore(transport, {
+      start: "2026-01-01",
+      end: "2026-01-31",
+    });
     const app = mount(DashboardPage, {
       target,
       props: { item, dashboardStore },
@@ -64,7 +68,10 @@ describe("DashboardPage", () => {
     const target = document.createElement("div");
     document.body.append(target);
     const transport = new MockTransport({ dashboards: { overview: page } });
-    const dashboardStore = createDashboardStore(transport);
+    const dashboardStore = createDashboardStore(transport, {
+      start: "2026-01-01",
+      end: "2026-01-31",
+    });
     const app = mount(DashboardPage, {
       target,
       props: { item, dashboardStore },

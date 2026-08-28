@@ -6,6 +6,8 @@ import type {
   DateRangeView,
   IngestionStatus,
   NavigationView,
+  PhaseEventInput,
+  PhaseEventView,
   QualityItem,
   WorkspaceView,
 } from "./lib/types";
@@ -43,7 +45,10 @@ describe("storage transport boundary", () => {
         activeProviders: {},
         modules: [],
       }),
-      getNavigation: async (): Promise<NavigationView> => ({ items: [] }),
+      getNavigation: async (): Promise<NavigationView> => ({
+        items: [],
+        initialRange: { start: "2026-01-01", end: "2026-01-31" },
+      }),
       getDashboard: async (
         _moduleId: string,
         _pageId: string,
@@ -56,6 +61,15 @@ describe("storage transport boundary", () => {
       refreshNow: async () => ({ scanId: "scan-1", coalescedRequests: 0 }),
       getIngestionStatus: async () => status,
       listQualityItems: async () => quality,
+      listPhaseEvents: async (): Promise<PhaseEventView[]> => [],
+      savePhaseEvent: async (
+        input: PhaseEventInput,
+      ): Promise<PhaseEventView> => ({
+        ...input,
+        phaseEventId: input.phaseEventId ?? "phase-1",
+      }),
+      deletePhaseEvent: async (_phaseEventId: string): Promise<void> =>
+        undefined,
       retryAsset: async (assetId) => ({
         assetId,
         attemptId: null,

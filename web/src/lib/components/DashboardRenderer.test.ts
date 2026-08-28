@@ -8,6 +8,7 @@ const ready: AvailabilityView = {
   reasonKey: "dashboard.ready",
   requiredCapabilities: [],
   requiredDependencies: [],
+  action: null,
 };
 
 const documentWithEveryAllowedNode = {
@@ -186,6 +187,7 @@ describe("DashboardRenderer", () => {
         reasonKey: "dashboard.availability",
         requiredCapabilities: ["body.weight"],
         requiredDependencies: ["base"],
+        action: null,
       },
     );
 

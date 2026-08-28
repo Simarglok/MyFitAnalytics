@@ -4,6 +4,7 @@
   import StatusBanner from './StatusBanner.svelte';
   import DashboardPage from '../pages/DashboardPage.svelte';
   import PhaseEventsPage from '../pages/PhaseEventsPage.svelte';
+  import SettingsPage from '../pages/SettingsPage.svelte';
   import SourcesQualityPage from '../pages/SourcesQualityPage.svelte';
   import { message } from '../i18n';
   import type { AppTransport } from '../transport';
@@ -30,7 +31,8 @@
       await appStore.load();
       if (!active) return;
       const item = appStore.state.navigation?.items[0];
-      if (item) await dashboardStore.load(item.moduleId, item.pageId);
+      const initialRange = appStore.state.navigation?.initialRange;
+      if (item && initialRange) await dashboardStore.load(item.moduleId, item.pageId, initialRange);
       if (!active) return;
       cleanup = await props.transport.subscribeDataChanged((event: DataChangedEvent) => {
         appStore.state.dataChanged = event;
@@ -39,7 +41,9 @@
         const current = appStore.state.navigation?.items.find(
           (candidate) => candidate.pageId === appStore.state.selectedPageId,
         );
-        if (current) void dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
+        if (current && dashboardStore.state.range) {
+          void dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
+        }
       });
     }
     void start();
@@ -51,15 +55,37 @@
 
   function openPage(item: NavigationItemView): void {
     appStore.select(item.pageId, item.moduleId);
-    if (item.pageId !== 'sources' && item.pageId !== 'phases') {
+    if (
+      item.pageId !== 'sources' &&
+      item.pageId !== 'phases' &&
+      item.pageId !== 'settings' &&
+      dashboardStore.state.range
+    ) {
       void dashboardStore.load(item.moduleId, item.pageId, dashboardStore.state.range);
+    }
+  }
+
+  function handleAvailabilityAction(action: string): void {
+    if (
+      action === 'dashboard.action.configure_source' ||
+      action === 'dashboard.action.import_data' ||
+      action === 'dashboard.action.enable' ||
+      action === 'dashboard.action.update_module'
+    ) {
+      appStore.select('settings', 'local');
     }
   }
 
   async function refresh(): Promise<void> {
     await appStore.refresh();
     const current = selectedItem;
-    if (current && current.pageId !== 'sources' && current.pageId !== 'phases') {
+    if (
+      current &&
+      current.pageId !== 'sources' &&
+      current.pageId !== 'phases' &&
+      current.pageId !== 'settings' &&
+      dashboardStore.state.range
+    ) {
       await dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
     }
   }
@@ -114,8 +140,15 @@
       <SourcesQualityPage transport={props.transport} />
     {:else if appState.selectedPageId === 'phases'}
       <PhaseEventsPage transport={props.transport} />
+    {:else if appState.selectedPageId === 'settings'}
+      <SettingsPage transport={props.transport} />
     {:else if selectedItem}
-      <DashboardPage item={selectedItem} {dashboardStore} {locale} />
+      <DashboardPage
+        item={selectedItem}
+        {dashboardStore}
+        {locale}
+        onAvailabilityAction={handleAvailabilityAction}
+      />
     {/if}
   </main>
 {/if}

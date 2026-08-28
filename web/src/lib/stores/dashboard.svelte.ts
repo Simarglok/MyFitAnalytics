@@ -4,7 +4,7 @@ import type { DashboardPageView, DateRangeView } from "../types";
 
 export interface DashboardStoreState {
   page: DashboardPageView | null;
-  range: DateRangeView;
+  range: DateRangeView | null;
   loading: boolean;
   error: TransportError | null;
   stale: boolean;
@@ -16,10 +16,13 @@ export interface DashboardStore {
   markStale(): void;
 }
 
-export function createDashboardStore(transport: AppTransport): DashboardStore {
+export function createDashboardStore(
+  transport: AppTransport,
+  initialRange?: DateRangeView,
+): DashboardStore {
   const state = $state<DashboardStoreState>({
     page: null,
-    range: { start: "2026-01-01", end: "2026-01-31" },
+    range: initialRange ? { ...initialRange } : null,
     loading: false,
     error: null,
     stale: false,
@@ -29,14 +32,27 @@ export function createDashboardStore(transport: AppTransport): DashboardStore {
   async function load(
     moduleId: string,
     pageId: string,
-    range = state.range,
+    range?: DateRangeView,
   ): Promise<void> {
+    const requestedRange = range ?? state.range;
+    if (!requestedRange) {
+      state.error = normalizeTransportError({
+        code: "missing_initial_date_range",
+        message: "navigation did not provide an initial dashboard date range",
+      });
+      state.loading = false;
+      return;
+    }
     const generation = ++requestGeneration;
-    state.range = { ...range };
+    state.range = { ...requestedRange };
     state.loading = true;
     state.error = null;
     try {
-      const page = await transport.getDashboard(moduleId, pageId, range);
+      const page = await transport.getDashboard(
+        moduleId,
+        pageId,
+        requestedRange,
+      );
       if (generation !== requestGeneration) return;
       state.page = page;
       state.stale = false;

@@ -3,7 +3,9 @@ mod support;
 use mfa_contracts::{CanonicalObservation, DashboardBlock, ModuleType};
 use mfa_module_host::ComponentRuntime;
 use std::sync::Arc;
-use support::{asset, dashboard_input, dashboard_module, limits, source_module};
+use support::{
+    asset, dashboard_input, dashboard_input_for_page, dashboard_module, limits, source_module,
+};
 use tempfile::TempDir;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -72,6 +74,35 @@ async fn dashboard_component_returns_only_declarative_document_contract() {
         document.blocks.first(),
         Some(DashboardBlock::Card(_))
     ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dashboard_component_rejects_unknown_raw_document_and_block_fields() {
+    let store = TempDir::new().unwrap();
+    let module = dashboard_module(&store, "guest-dashboard.wasm");
+    let runtime = ComponentRuntime::new();
+
+    let top_level = runtime
+        .invoke_dashboard(
+            &module,
+            dashboard_input_for_page(Some("raw-top-level-unknown")),
+            limits(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(top_level.code(), "module_malformed_output");
+
+    for page_id in ["raw-block-on-click", "raw-block-html", "raw-block-url"] {
+        let error = runtime
+            .invoke_dashboard(&module, dashboard_input_for_page(Some(page_id)), limits())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.code(),
+            "module_malformed_output",
+            "field case: {page_id}"
+        );
+    }
 }
 
 #[test]

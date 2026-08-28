@@ -10,6 +10,7 @@ test-support = []
 
 [dependencies]
 jsonschema.workspace = true
+mfa-dashboard-host = { path = "../mfa-dashboard-host" }
 mfa-config = { path = "../mfa-config" }
 mfa-contracts = { path = "../mfa-contracts" }
 semver.workspace = true

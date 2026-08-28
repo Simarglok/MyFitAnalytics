@@ -42,7 +42,9 @@ export interface AppTransport {
     moduleId: string,
   ): Promise<ProviderSelection>;
   selectProvider?(capability: string, moduleId: string): Promise<ProviderView>;
-  savePhaseEvent?(input: PhaseEventInput): Promise<PhaseEventView>;
+  listPhaseEvents(): Promise<PhaseEventView[]>;
+  savePhaseEvent(input: PhaseEventInput): Promise<PhaseEventView>;
+  deletePhaseEvent(phaseEventId: string): Promise<void>;
   subscribeDataChanged(
     listener: (event: DataChangedEvent) => void,
   ): Promise<() => void>;

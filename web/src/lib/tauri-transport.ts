@@ -90,8 +90,16 @@ export class TauriTransport implements AppTransport {
     return this.invoke("select_provider", { capability, moduleId });
   }
 
+  async listPhaseEvents(): Promise<PhaseEventView[]> {
+    return this.invoke("list_phase_events");
+  }
+
   async savePhaseEvent(input: PhaseEventInput): Promise<PhaseEventView> {
     return this.invoke("save_phase_event", { input });
+  }
+
+  async deletePhaseEvent(phaseEventId: string): Promise<void> {
+    return this.invoke("delete_phase_event", { phaseEventId });
   }
 
   async refreshNow(): Promise<ScanTicket> {

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import SettingsPage from './SettingsPage.svelte';
   import { normalizeTransportError, type AppTransport, type TransportError } from '../transport';
   import type { QualityItem } from '../types';
   import { message } from '../i18n';
@@ -73,5 +72,3 @@
     </div>
   {/if}
 </section>
-
-<SettingsPage {transport} />

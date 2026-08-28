@@ -1,3 +1,4 @@
+use chrono::Days;
 use mfa_contracts::{AvailabilityState, DashboardBlock, LocalDate};
 use mfa_dashboard_host::DashboardOutput;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -10,10 +11,15 @@ pub struct DateRangeView {
 }
 
 impl DateRangeView {
-    pub fn synthetic_default() -> Self {
+    pub fn initial(latest_observation: Option<LocalDate>, local_today: LocalDate) -> Self {
+        let end = latest_observation.unwrap_or(local_today);
+        let start = end
+            .as_naive()
+            .checked_sub_days(Days::new(30))
+            .expect("supported local dates have a 31-day history");
         Self {
-            start: "2026-01-01".to_owned(),
-            end: "2026-01-31".to_owned(),
+            start: LocalDate::from(start).to_string(),
+            end: end.to_string(),
         }
     }
 
@@ -30,6 +36,30 @@ impl DateRangeView {
             return Err("date range start must not be after end".to_owned());
         }
         Ok((start, end))
+    }
+}
+
+#[cfg(test)]
+mod date_range_tests {
+    use super::DateRangeView;
+    use mfa_contracts::LocalDate;
+
+    fn test_date(value: &str) -> LocalDate {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn initial_range_prefers_latest_observation_over_today() {
+        let range = DateRangeView::initial(Some(test_date("2026-04-15")), test_date("2026-08-28"));
+        assert_eq!(range.start, "2026-03-16");
+        assert_eq!(range.end, "2026-04-15");
+    }
+
+    #[test]
+    fn initial_range_uses_injected_today_when_no_observation_exists() {
+        let range = DateRangeView::initial(None, test_date("2026-04-15"));
+        assert_eq!(range.start, "2026-03-16");
+        assert_eq!(range.end, "2026-04-15");
     }
 }
 
@@ -118,6 +148,7 @@ pub struct NavigationItemView {
 #[serde(rename_all = "camelCase")]
 pub struct NavigationView {
     pub items: Vec<NavigationItemView>,
+    pub initial_range: DateRangeView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -40,6 +40,12 @@ describe("English UI catalog", () => {
       "base.sources.modules",
       "base.sources.snapshots",
       "base.card_available",
+      "navigation.settings",
+      "dashboard.action.configure_source",
+      "dashboard.action.import_data",
+      "dashboard.action.enable",
+      "dashboard.action.update_module",
+      "dashboard.action.guidance",
     ];
     const missing = required.filter(
       (key) => !catalog.catalogKeys().includes(key),

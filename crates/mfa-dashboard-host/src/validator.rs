@@ -51,14 +51,33 @@ pub fn validate_document(
     grant: &DashboardInput,
     localization_keys: &BTreeSet<String>,
 ) -> Result<(), DocumentValidationError> {
-    localization_key(&document.title_key, localization_keys)?;
+    validate_document_with_localization(document, grant, Some(localization_keys))
+}
+
+pub fn validate_raw_document_json(
+    raw: &Value,
+    grant: &DashboardInput,
+) -> Result<DashboardDocument, DocumentValidationError> {
+    reject_unknown_node_types(raw)?;
+    let document: DashboardDocument = serde_json::from_value(raw.clone())
+        .map_err(|_| DocumentValidationError::MalformedDocument)?;
+    validate_document_with_localization(&document, grant, None)?;
+    Ok(document)
+}
+
+fn validate_document_with_localization(
+    document: &DashboardDocument,
+    grant: &DashboardInput,
+    localization_keys: Option<&BTreeSet<String>>,
+) -> Result<(), DocumentValidationError> {
+    validate_localization_key(&document.title_key, localization_keys)?;
     let mut point_count = 0usize;
     for block in &document.blocks {
         match block {
             DashboardBlock::Card(card) => {
-                localization_key(&card.label, localization_keys)?;
+                validate_localization_key(&card.label, localization_keys)?;
                 if let Some(presentation) = &card.presentation {
-                    localization_key(&presentation.summary_key, localization_keys)?;
+                    validate_localization_key(&presentation.summary_key, localization_keys)?;
                     if let Some(value) = &presentation.summary_value {
                         validate_summary_value(value)?;
                     }
@@ -67,7 +86,7 @@ pub fn validate_document(
             }
             DashboardBlock::Table(table) => {
                 for column in &table.columns {
-                    localization_key(column, localization_keys)?;
+                    validate_localization_key(column, localization_keys)?;
                 }
                 for row in &table.rows {
                     for value in row {
@@ -76,7 +95,7 @@ pub fn validate_document(
                 }
             }
             DashboardBlock::StatusPanel(panel) => {
-                localization_key(&panel.message_key, localization_keys)?;
+                validate_localization_key(&panel.message_key, localization_keys)?;
             }
             DashboardBlock::Chart(chart) => {
                 if !matches!(
@@ -88,7 +107,7 @@ pub fn validate_document(
                     });
                 }
                 for series in &chart.series {
-                    localization_key(&series.name, localization_keys)?;
+                    validate_localization_key(&series.name, localization_keys)?;
                     if series.points.len() > MAX_POINTS_PER_SERIES {
                         return Err(DocumentValidationError::SeriesTooLarge);
                     }
@@ -116,9 +135,7 @@ pub fn validate_document_json(
     grant: &DashboardInput,
     localization_keys: &BTreeSet<String>,
 ) -> Result<DashboardDocument, DocumentValidationError> {
-    reject_unknown_node_types(raw)?;
-    let document: DashboardDocument = serde_json::from_value(raw.clone())
-        .map_err(|_| DocumentValidationError::MalformedDocument)?;
+    let document = validate_raw_document_json(raw, grant)?;
     validate_document(&document, grant, localization_keys)?;
     Ok(document)
 }
@@ -165,12 +182,14 @@ fn reject_unknown_node_types(raw: &Value) -> Result<(), DocumentValidationError>
     Ok(())
 }
 
-fn localization_key(
+fn validate_localization_key(
     key: &str,
-    localization_keys: &BTreeSet<String>,
+    localization_keys: Option<&BTreeSet<String>>,
 ) -> Result<(), DocumentValidationError> {
     safe_string(key)?;
-    if !localization_keys.contains(key) {
+    if let Some(localization_keys) = localization_keys
+        && !localization_keys.contains(key)
+    {
         return Err(DocumentValidationError::UndeclaredLocalization {
             key: key.to_owned(),
         });

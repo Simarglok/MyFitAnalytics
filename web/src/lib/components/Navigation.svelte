@@ -33,10 +33,21 @@
       aria-current={selectedPageId === 'phases' ? 'page' : undefined}
       on:click={() => onSelect({
         id: 'local:phases', pageId: 'phases', titleKey: 'navigation.phases', moduleId: 'local',
-        availability: { state: 'ready', reasonKey: 'dashboard.ready', requiredCapabilities: [], requiredDependencies: [] },
+        availability: { state: 'ready', reasonKey: 'dashboard.ready', requiredCapabilities: [], requiredDependencies: [], action: null },
       })}
     >
       <span>{message('navigation.phases')}</span>
+    </button>
+    <button
+      type="button"
+      class:active={selectedPageId === 'settings'}
+      aria-current={selectedPageId === 'settings' ? 'page' : undefined}
+      on:click={() => onSelect({
+        id: 'local:settings', pageId: 'settings', titleKey: 'navigation.settings', moduleId: 'local',
+        availability: { state: 'ready', reasonKey: 'dashboard.ready', requiredCapabilities: [], requiredDependencies: [], action: null },
+      })}
+    >
+      <span>{message('navigation.settings')}</span>
     </button>
   </div>
 </nav>

@@ -168,6 +168,20 @@ li div {
   color: #fca5a5;
 }
 
+.confirmation {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #b45309;
+  border-radius: 0.75rem;
+  background: rgba(120, 53, 15, 0.24);
+}
+.confirmation h3,
+.confirmation p {
+  margin: 0;
+}
+
 button,
 input,
 textarea,

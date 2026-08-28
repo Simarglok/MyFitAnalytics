@@ -8,9 +8,10 @@
   export let item: NavigationItemView;
   export let dashboardStore: DashboardStore;
   export let locale = 'en-US';
+  export let onAvailabilityAction: ((action: string) => void) | undefined = undefined;
 
-  let start = dashboardStore.state.range.start;
-  let end = dashboardStore.state.range.end;
+  let start = dashboardStore.state.range?.start ?? '';
+  let end = dashboardStore.state.range?.end ?? '';
   let rangeError = '';
 
   async function applyRange(): Promise<void> {
@@ -25,6 +26,10 @@
 
   $: page = dashboardStore.state.page;
   $: dashboardError = dashboardStore.state.error;
+  $: if (dashboardStore.state.range && !start && !end) {
+    start = dashboardStore.state.range.start;
+    end = dashboardStore.state.range.end;
+  }
 </script>
 
 <section class="page panel" aria-labelledby="dashboard-title">
@@ -62,6 +67,12 @@
       <span>{message('dashboard.coverage')}: {formatNumber(page.coverage.observedDays, locale)} / {formatNumber(page.coverage.expectedDays, locale)}</span>
       <span>{page.coverage.sufficient ? 'Sufficient' : 'Limited'}</span>
     </div>
-    <DashboardRenderer document={page.document} availability={page.availability} stale={dashboardStore.state.stale} {locale} />
+    <DashboardRenderer
+      document={page.document}
+      availability={page.availability}
+      onAvailabilityAction={onAvailabilityAction}
+      stale={dashboardStore.state.stale}
+      {locale}
+    />
   {/if}
 </section>

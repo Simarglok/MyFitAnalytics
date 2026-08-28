@@ -1,7 +1,10 @@
 use mfa_contracts::{AvailabilityState, DashboardBlock, DashboardInput};
 use serde_json::json;
 
-use crate::{card, has_capability, status, value_or_missing};
+use crate::{
+    availability_message_key, card, has_capability, page_availability_state, status,
+    value_or_missing,
+};
 
 pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
     let available = [
@@ -12,6 +15,14 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
     ]
     .iter()
     .all(|capability| has_capability(input, capability));
+    let availability_state = page_availability_state(
+        input,
+        if available {
+            AvailabilityState::Ready
+        } else {
+            AvailabilityState::MissingCapability
+        },
+    );
     vec![
         card(
             "sources.modules",
@@ -35,16 +46,12 @@ pub fn compose(input: &DashboardInput) -> Vec<DashboardBlock> {
         ),
         status(
             "sources.status",
-            if available {
-                AvailabilityState::Ready
-            } else {
-                AvailabilityState::MissingCapability
-            },
-            if available {
-                "base.sources.ready"
-            } else {
-                "base.sources.missing"
-            },
+            availability_state.clone(),
+            availability_message_key(
+                &availability_state,
+                "base.sources.ready",
+                "base.sources.missing",
+            ),
         ),
     ]
 }

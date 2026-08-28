@@ -46,7 +46,10 @@
     "sources.ready": "Source inventory is available.",
     "sources.missing": "Source inventory is unavailable for this range.",
     "state.missing_capability": "Missing capability",
+    "state.missing_dependency": "Required module is unavailable",
+    "state.incompatible_contract": "Module contract is incompatible",
     "state.waiting_for_data": "Waiting for data",
-    "state.insufficient_coverage": "Insufficient coverage"
+    "state.insufficient_coverage": "Insufficient coverage",
+    "state.disabled_by_user": "Dashboard is disabled"
   }
 }

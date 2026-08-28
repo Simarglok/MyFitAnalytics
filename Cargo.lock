@@ -2854,6 +2854,7 @@ dependencies = [
  "jsonschema",
  "mfa-config",
  "mfa-contracts",
+ "mfa-dashboard-host",
  "mfa-module-host",
  "semver",
  "serde",

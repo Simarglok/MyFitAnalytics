@@ -4,20 +4,27 @@ MyFitAnalytics is a local-first, private workspace for personal fitness analytic
 
 ## Status
 
-Plan 4 (analytics and dashboard UI) is implemented through its non-foreground
-production-path gate. The repository includes the Rust workspace, shared
-versioned contracts, module package validation and installation,
+Plan 4 (analytics and dashboard UI) is complete, including the packaged native
+macOS acceptance completed by the manager on the pre-correction Plan 4
+implementation. Its non-foreground production-path gate is green. The
+repository includes the Rust workspace, shared versioned contracts, module
+package validation and installation,
 Storage/Ingestion, bundled Hevy and MyNetDiary source modules, deterministic
 base analytics, a sandboxed Wasm component host, capability/provider
 resolution, locale fallback, and a typed Tauri-to-Svelte dashboard shell.
 
+The backend supplies the initial dashboard window as an inclusive 31-day range
+ending at the latest available observation, or at the current local date when
+no observation exists; the frontend does not invent a production date default.
+
 Task 7's automated gate uses only checked-in synthetic MyNetDiary and Hevy
-fixtures, isolated temporary roots, and the application command services. It
-does not claim the later packaged native macOS acceptance required by Plan 4;
-that acceptance remains deferred to the manager-owned follow-up. Plan 5
-(desktop lifecycle, tray/background behavior, and release packaging) remains
-deferred. Local macOS `.app` and DMG bundles, when built, are development
-validation artifacts; no notarization or publishing is claimed.
+fixtures, isolated temporary roots, and the application command services. The
+current runtime and UI corrections were made after that packaged acceptance, so
+a fresh packaged/native rerun is pending manager execution; this checkout does
+not claim that rerun. Plan 5 (desktop lifecycle, tray/background behavior, and
+release packaging) remains deferred. Local macOS `.app` and DMG bundles, when
+built, are development validation artifacts; notarization and publishing are
+not claimed.
 
 ## Architecture
 

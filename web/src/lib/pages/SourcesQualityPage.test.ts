@@ -33,4 +33,20 @@ describe("SourcesQualityPage", () => {
     );
     unmount(app);
   });
+
+  it("keeps Settings controls out of the quality page", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const app = mount(SourcesQualityPage, {
+      target,
+      props: { transport: new MockTransport() },
+    });
+
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain("Data quality"),
+    );
+    expect(target.querySelector("#settings-title")).toBeNull();
+    expect(target.querySelector('[data-action="choose-workspace"]')).toBeNull();
+    unmount(app);
+  });
 });

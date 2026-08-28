@@ -32,9 +32,7 @@ A minimal manifest has this shape:
   "package_format_version": "1.0.0",
   "dashboard_api_version": "1.0.0",
   "compatible_app_versions": [">=0.1.0"],
-  "required_capabilities": [
-    {"capability": "body.weight"}
-  ],
+  "required_capabilities": [{ "capability": "body.weight" }],
   "required_extension_contracts": [],
   "localization_namespace": "example-dashboard",
   "entrypoint_hash": "sha256:<module.wasm sha256>"
@@ -63,8 +61,8 @@ grants:
 ```json
 {
   "required_capabilities": [
-    {"capability": "body.weight"},
-    {"capability": "nutrition.items"}
+    { "capability": "body.weight" },
+    { "capability": "nutrition.items" }
   ],
   "required_extension_contracts": []
 }
@@ -87,13 +85,13 @@ The host rejects malformed JSON, undeclared capability/dataset references,
 unsafe strings, unknown node types, unsupported chart types, non-finite values,
 excessive output, and non-declarative content. The runtime defaults are:
 
-| Limit | Default |
-| --- | ---: |
-| Wasmtime linear memory | 64 MiB |
-| Fuel | 10,000,000 units |
-| Epoch timeout | 2 seconds |
-| Guest output (`describe` and `compose`) | 1 MiB |
-| Store instances/tables | 8 / 8 |
+| Limit                                   |          Default |
+| --------------------------------------- | ---------------: |
+| Wasmtime linear memory                  |           64 MiB |
+| Fuel                                    | 10,000,000 units |
+| Epoch timeout                           |        2 seconds |
+| Guest output (`describe` and `compose`) |            1 MiB |
+| Store instances/tables                  |            8 / 8 |
 
 Limit failures are classified as `module_memory_limit`,
 `module_fuel_exhausted`, `module_timeout`, or `module_output_limit`; malformed
@@ -103,10 +101,16 @@ or unsafe contracts use typed errors such as `module_malformed_output`,
 line/bar/scatter/calendar heatmap charts; keep HTML, scripts, URLs, SQL, and
 event-handler keys out of output.
 
-The base module uses `dashboard.page` as a host-provided routing capability.
-Every page must have a stable page ID, title localization key, and stable
-block keys. Page selection must happen inside the component; the host calls
-one command for each requested page.
+The base module receives the requested page through `DashboardInput.page_id`.
+Page routing is an input value, not a capability grant or module dependency.
+Every page must have a stable page ID, title localization key, and stable block
+keys. Page selection must happen inside the component from `page_id`; the host
+calls one command for each requested page.
+
+For the first dashboard view, the command service owns the initial date range:
+it supplies an inclusive 31-day window ending at the latest available
+observation, or ending at the current local date when no observation exists.
+Dashboard modules must not hard-code a production date range.
 
 ## Data and availability
 

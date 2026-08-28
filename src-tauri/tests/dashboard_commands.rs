@@ -1,9 +1,10 @@
 use mfa_config::{AppSettings, SettingsStore};
-use mfa_contracts::DashboardBlock;
+use mfa_contracts::{DashboardBlock, LocalDate};
 use mfa_dashboard_host::DashboardOutput;
 use mfa_module_host::PackageInstaller;
 use myfitanalytics::commands::{
-    choose_workspace_root_inner, get_dashboard_inner, get_navigation_inner, save_phase_event_inner,
+    choose_workspace_root_inner, delete_phase_event, delete_phase_event_inner, get_dashboard_inner,
+    get_navigation_inner, list_phase_events, list_phase_events_inner, save_phase_event_inner,
 };
 use myfitanalytics::dialogs::DialogPort;
 use myfitanalytics::view_models::{DateRangeView, PhaseEventInput};
@@ -51,6 +52,19 @@ fn state() -> (myfitanalytics::AppState, TempDir) {
     (state, root)
 }
 
+fn fixture_range() -> DateRangeView {
+    DateRangeView {
+        start: "2026-01-01".to_owned(),
+        end: "2026-01-31".to_owned(),
+    }
+}
+
+#[test]
+fn phase_event_commands_expose_typed_list_and_delete_entrypoints() {
+    let _ = list_phase_events;
+    let _ = delete_phase_event;
+}
+
 #[tokio::test]
 async fn navigation_and_dashboard_commands_return_safe_typed_views() {
     let (state, _root) = state();
@@ -69,7 +83,7 @@ async fn navigation_and_dashboard_commands_return_safe_typed_views() {
     let dashboard = get_dashboard_inner(
         "base".to_owned(),
         "overview".to_owned(),
-        DateRangeView::synthetic_default(),
+        fixture_range(),
         &state,
     )
     .await
@@ -88,6 +102,24 @@ async fn navigation_and_dashboard_commands_return_safe_typed_views() {
     let value: Value = serde_json::to_value(&dashboard).unwrap();
     assert!(value.get("rawSnapshot").is_none());
     assert!(value.to_string().len() < 100_000);
+}
+
+#[tokio::test]
+async fn navigation_uses_the_injected_local_date_when_no_observation_exists() {
+    let (state, _root) = state();
+    let navigation = myfitanalytics::commands::get_navigation_inner_at(
+        &state,
+        "2026-04-15".parse::<LocalDate>().unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        navigation.initial_range,
+        DateRangeView {
+            start: "2026-03-16".to_owned(),
+            end: "2026-04-15".to_owned(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -121,11 +153,63 @@ async fn phase_event_command_round_trips_a_user_owned_event() {
     );
 }
 
+#[tokio::test]
+async fn phase_event_commands_list_update_and_delete_typed_views() {
+    let (state, root) = state();
+    choose_workspace_root_inner(
+        &state,
+        &WorkspaceDialog(Mutex::new(Some(root.path().join("workspace")))),
+    )
+    .await
+    .unwrap();
+
+    let created = save_phase_event_inner(
+        PhaseEventInput {
+            phase_event_id: None,
+            event_type: "bulk".to_owned(),
+            start_date: "2026-02-01".to_owned(),
+            end_date: "2026-02-03".to_owned(),
+            description: Some("before edit".to_owned()),
+            exclude_from_tdee: true,
+        },
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        list_phase_events_inner(&state).await.unwrap(),
+        vec![created.clone()]
+    );
+
+    let updated = save_phase_event_inner(
+        PhaseEventInput {
+            phase_event_id: Some(created.phase_event_id.clone()),
+            event_type: "maintenance".to_owned(),
+            start_date: "2026-02-02".to_owned(),
+            end_date: "2026-02-04".to_owned(),
+            description: Some("after edit".to_owned()),
+            exclude_from_tdee: false,
+        },
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        list_phase_events_inner(&state).await.unwrap(),
+        vec![updated]
+    );
+
+    delete_phase_event_inner(created.phase_event_id, &state)
+        .await
+        .unwrap();
+    assert!(list_phase_events_inner(&state).await.unwrap().is_empty());
+}
+
 #[test]
 fn availability_state_serializes_as_a_primitive_snake_case_string() {
     let view = myfitanalytics::view_models::AvailabilityView {
-        state: mfa_contracts::AvailabilityState::WaitingForData,
-        reason_key: "dashboard.waiting_for_data".to_owned(),
+        state: mfa_contracts::AvailabilityState::InsufficientCoverage,
+        reason_key: "dashboard.insufficient_coverage".to_owned(),
         required_capabilities: vec!["body.weight".to_owned()],
         required_dependencies: Vec::new(),
         freshness: mfa_dashboard_host::Freshness::Fresh,
@@ -133,8 +217,9 @@ fn availability_state_serializes_as_a_primitive_snake_case_string() {
     };
 
     let serialized = serde_json::to_value(view).unwrap();
-    assert_eq!(serialized["state"], "waiting_for_data");
+    assert_eq!(serialized["state"], "insufficient_coverage");
     assert!(serialized["state"].is_string());
+    assert_eq!(serialized["action"], "dashboard.action.import_data");
 }
 
 #[tokio::test]
@@ -143,7 +228,7 @@ async fn unconfigured_dashboard_does_not_emit_ready_inner_status_or_capabilities
     let dashboard = get_dashboard_inner(
         "base".to_owned(),
         "overview".to_owned(),
-        DateRangeView::synthetic_default(),
+        fixture_range(),
         &state,
     )
     .await

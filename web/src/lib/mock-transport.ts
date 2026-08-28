@@ -3,6 +3,7 @@ import type { AppTransport } from "./transport";
 import type {
   AttemptView,
   AvailabilityState,
+  AvailabilityView,
   BootstrapState,
   DashboardPageView,
   DateRangeView,
@@ -29,6 +30,9 @@ export interface MockTransportOptions {
   chooseWorkspaceResult?: WorkspaceView | null;
   chooseAndInstallResult?: ModuleView | null;
   error?: unknown;
+  listPhaseEventsError?: unknown;
+  savePhaseEventError?: unknown;
+  deletePhaseEventError?: unknown;
   workspace?: WorkspaceView;
   status?: IngestionStatus;
   qualityItems?: QualityItem[];
@@ -37,6 +41,33 @@ export interface MockTransportOptions {
   phaseEvents?: PhaseEventView[];
   dashboardAvailability?: AvailabilityState;
   health?: HealthState;
+}
+
+function availabilityAction(state: AvailabilityState): string | null {
+  switch (state) {
+    case "ready":
+      return null;
+    case "disabled_by_user":
+      return "dashboard.action.enable";
+    case "incompatible_contract":
+      return "dashboard.action.update_module";
+    case "missing_capability":
+    case "missing_dependency":
+      return "dashboard.action.configure_source";
+    case "waiting_for_data":
+    case "insufficient_coverage":
+      return "dashboard.action.import_data";
+  }
+}
+
+function availabilityView(state: AvailabilityState): AvailabilityView {
+  return {
+    state,
+    reasonKey: `dashboard.${state}`,
+    requiredCapabilities: [],
+    requiredDependencies: [],
+    action: availabilityAction(state),
+  };
 }
 
 export class MockTransport implements AppTransport {
@@ -76,22 +107,16 @@ export class MockTransport implements AppTransport {
       ["strength", "Strength"],
       ["sources", "Sources & quality"],
     ];
+    const state = this.options.dashboardAvailability ?? "ready";
     return {
       items: pages.map(([pageId]) => ({
         id: `base:${pageId}`,
         pageId,
         titleKey: `base.${pageId}.title`,
         moduleId: "base",
-        availability: {
-          state: this.options.dashboardAvailability ?? "ready",
-          reasonKey:
-            this.options.dashboardAvailability === "disabled_by_user"
-              ? "dashboard.disabled_by_user"
-              : "dashboard.ready",
-          requiredCapabilities: [],
-          requiredDependencies: [],
-        },
+        availability: availabilityView(state),
       })),
+      initialRange: { start: "2026-01-01", end: "2026-01-31" },
     };
   }
 
@@ -104,6 +129,7 @@ export class MockTransport implements AppTransport {
       throw normalizeTransportError(this.options.error);
     const supplied = this.options.dashboards?.[pageId];
     if (supplied) return supplied;
+    const state = this.options.dashboardAvailability ?? "ready";
     return {
       moduleId,
       pageId,
@@ -129,15 +155,7 @@ export class MockTransport implements AppTransport {
           },
         ],
       },
-      availability: {
-        state: this.options.dashboardAvailability ?? "ready",
-        reasonKey:
-          this.options.dashboardAvailability === "disabled_by_user"
-            ? "dashboard.disabled_by_user"
-            : "dashboard.ready",
-        requiredCapabilities: [],
-        requiredDependencies: [],
-      },
+      availability: availabilityView(state),
       coverage: {
         expectedDays: 30,
         observedDays: 30,
@@ -295,14 +313,47 @@ export class MockTransport implements AppTransport {
   async savePhaseEvent(input: PhaseEventInput): Promise<PhaseEventView> {
     if (this.options.error !== undefined)
       throw normalizeTransportError(this.options.error);
+    if (this.options.savePhaseEventError !== undefined)
+      throw normalizeTransportError(this.options.savePhaseEventError);
     const event: PhaseEventView = {
       ...input,
       phaseEventId:
         input.phaseEventId ?? `mock-phase-${this.phaseEvents.length + 1}`,
     };
-    this.phaseEvents.push(event);
+    const existing = this.phaseEvents.findIndex(
+      (candidate) => candidate.phaseEventId === event.phaseEventId,
+    );
+    if (existing === -1) this.phaseEvents.push(event);
+    else this.phaseEvents[existing] = event;
     this.calls.push(`savePhaseEvent:${event.phaseEventId}`);
     return event;
+  }
+
+  async listPhaseEvents(): Promise<PhaseEventView[]> {
+    if (this.options.error !== undefined)
+      throw normalizeTransportError(this.options.error);
+    if (this.options.listPhaseEventsError !== undefined)
+      throw normalizeTransportError(this.options.listPhaseEventsError);
+    this.calls.push("listPhaseEvents");
+    return this.phaseEvents.map((event) => ({ ...event }));
+  }
+
+  async deletePhaseEvent(phaseEventId: string): Promise<void> {
+    if (this.options.error !== undefined)
+      throw normalizeTransportError(this.options.error);
+    if (this.options.deletePhaseEventError !== undefined)
+      throw normalizeTransportError(this.options.deletePhaseEventError);
+    const existing = this.phaseEvents.findIndex(
+      (event) => event.phaseEventId === phaseEventId,
+    );
+    if (existing === -1) {
+      throw {
+        code: "phase_event_not_found",
+        message: "the phase event no longer exists",
+      };
+    }
+    this.phaseEvents.splice(existing, 1);
+    this.calls.push(`deletePhaseEvent:${phaseEventId}`);
   }
 
   async refreshNow(): Promise<ScanTicket> {

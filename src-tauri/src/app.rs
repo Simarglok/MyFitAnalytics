@@ -34,6 +34,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             commands::get_dashboard,
             commands::select_provider,
             commands::save_phase_event,
+            commands::list_phase_events,
+            commands::delete_phase_event,
             commands::refresh_now,
             commands::get_ingestion_status,
             commands::list_quality_items,
