@@ -36,16 +36,16 @@ packages, and one serial database actor.
 
 ## Current Plan 4 requirement-to-evidence checklist
 
-| Requirement | Current evidence boundary |
-| --- | --- |
-| Deterministic weight, nutrition, activity, and strength analytics | `crates/mfa-analytics/tests/*_golden.rs`; semantic assertions in `crates/mfa-integration-tests/tests/dashboard_gate.rs` |
-| Rolling TDEE, coverage, phase exclusion, and persisted phase events | `crates/mfa-analytics/tests/tdee_golden.rs`; `crates/mfa-analytics/tests/phase_events.rs`; `src-tauri/tests/dashboard_commands.rs`; production gate re-query |
-| Sandboxed declarative dashboard and safe document validation | `crates/mfa-dashboard-host/tests/{document_security,dependency_isolation}.rs`; `modules/dashboards/base/tests/{conformance,document_golden}.rs`; packaged invocation in Task 7 gate |
-| Availability precedence, dependency isolation, capability/provider selection, and locale boundary | `crates/mfa-dashboard-host/tests/availability.rs`; module-host capability/locale/runtime suites; Tauri provider and command-contract tests |
-| Typed Tauri-to-Svelte dashboard shell, settings, source quality, refresh, and phase-event UI | `web/src/**/*.test.ts`; `src-tauri/tests/{dashboard_commands,ingestion_commands,module_lifecycle_commands}.rs`; 5 Playwright scenarios |
-| Serial production-path import, archive, active snapshots, all six pages, semantic goldens, and DB lifecycle | `bash scripts/run-dashboard-gate.sh`; `crates/mfa-integration-tests/tests/dashboard_gate.rs` |
-| Ingestion/actionability correction: stable current failures, idempotent Refresh, success clearing, deterministic counts, safe retry/Open Settings, and no auto-update | Focused `mfa-ingestion` and `myfitanalytics` correction tests; typed status/quality transport tests |
-| Packaged-native manual interaction and screenshots | `docs/testing/plan4-packaged-native-manual.md`; current result is **NOT RUN** |
+| Requirement                                                                                                                                                           | Current evidence boundary                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deterministic weight, nutrition, activity, and strength analytics                                                                                                     | `crates/mfa-analytics/tests/*_golden.rs`; semantic assertions in `crates/mfa-integration-tests/tests/dashboard_gate.rs`                                                             |
+| Rolling TDEE, coverage, phase exclusion, and persisted phase events                                                                                                   | `crates/mfa-analytics/tests/tdee_golden.rs`; `crates/mfa-analytics/tests/phase_events.rs`; `src-tauri/tests/dashboard_commands.rs`; production gate re-query                        |
+| Sandboxed declarative dashboard and safe document validation                                                                                                          | `crates/mfa-dashboard-host/tests/{document_security,dependency_isolation}.rs`; `modules/dashboards/base/tests/{conformance,document_golden}.rs`; packaged invocation in Task 7 gate |
+| Availability precedence, dependency isolation, capability/provider selection, and locale boundary                                                                     | `crates/mfa-dashboard-host/tests/availability.rs`; module-host capability/locale/runtime suites; Tauri provider and command-contract tests                                          |
+| Typed Tauri-to-Svelte dashboard shell, settings, source quality, refresh, and phase-event UI                                                                          | `web/src/**/*.test.ts`; `src-tauri/tests/{dashboard_commands,ingestion_commands,module_lifecycle_commands}.rs`; 5 Playwright scenarios                                              |
+| Serial production-path import, archive, active snapshots, all six pages, semantic goldens, and DB lifecycle                                                           | `bash scripts/run-dashboard-gate.sh`; `crates/mfa-integration-tests/tests/dashboard_gate.rs`                                                                                        |
+| Ingestion/actionability correction: stable current failures, idempotent Refresh, success clearing, deterministic counts, safe retry/Open Settings, and no auto-update | Focused `mfa-ingestion` and `myfitanalytics` correction tests; typed status/quality transport tests                                                                                 |
+| Packaged-native manual interaction and screenshots                                                                                                                    | `docs/testing/plan4-packaged-native-manual.md`; current result is **NOT RUN**                                                                                                       |
 
 The exact historical RED stdout for Tasks 1–6 was not retained in the current
 session database. It is not reconstructed here. The table identifies the
@@ -488,13 +488,13 @@ afterward.
 The hash-verified profile guard covered six roots. Baseline and restored hashes
 matched exactly:
 
-| Root                                     | Digest / state                                                                                 |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Application Support                      | `053f6b2ae908b90a27de7f548155f52ae59ab474b5c7b61141dad5729572ed4f` (13 files)                 |
-| Caches                                   | `a750c3dca81b7dbbbf63e0ca798f1ef3224b125804ae07a528dc7975bbf8db24` (2 files)                  |
-| WebKit                                   | `97cbbe2844d594d611f85922d011c5b61118ee750b34ef0f5e86fe50a6676c43` (8 files)                 |
-| Preferences                              | `f1e7c74da98f6a565968c4e481b3943d4ca19ec4a3d06731b8e15705261e3a0a` (1 file)                  |
-| Saved Application State and HTTPStorages | absent; digest `47e9c196252b5866d81bcf29627f6fe50b54428ec30ed736998e139d60e10a9a`             |
+| Root                                     | Digest / state                                                                    |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| Application Support                      | `053f6b2ae908b90a27de7f548155f52ae59ab474b5c7b61141dad5729572ed4f` (13 files)     |
+| Caches                                   | `a750c3dca81b7dbbbf63e0ca798f1ef3224b125804ae07a528dc7975bbf8db24` (2 files)      |
+| WebKit                                   | `97cbbe2844d594d611f85922d011c5b61118ee750b34ef0f5e86fe50a6676c43` (8 files)      |
+| Preferences                              | `f1e7c74da98f6a565968c4e481b3943d4ca19ec4a3d06731b8e15705261e3a0a` (1 file)       |
+| Saved Application State and HTTPStorages | absent; digest `47e9c196252b5866d81bcf29627f6fe50b54428ec30ed736998e139d60e10a9a` |
 
 The guard manifest reports `restored=true` and exact `before==after`. The test
 profile was preserved under the acceptance root, and the original user

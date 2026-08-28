@@ -75,8 +75,8 @@ Before launch:
    ```
 
    The status must be clean for the build being accepted. The fixture verifier
-   must report `verified 7 BIFF fixtures and 2 CSV fixtures; privacy scan
-passed`.
+   must report this exact output:
+   `verified 7 BIFF fixtures and 2 CSV fixtures; privacy scan passed`.
 
 2. Before starting the run, the operator must pre-provision a session-owned
    six-root hash-guard helper implementing the approved backup/restore
