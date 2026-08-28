@@ -42,19 +42,184 @@ The failure fixture is optional for the happy-path run, but it is required to
 exercise bounded/current attention behavior. No other fixture, export, or
 record may be used.
 
-From the repository root, prepare a fresh acceptance root and do not reuse a
-previous run:
+From the repository root, execute the setup below in the same shell that will
+run the rest of this runbook. Do not paste later snippets into child shells.
+The pre-provisioned guard is validated before the acceptance root is created,
+and the single `EXIT` handler is installed immediately after the root and
+guard variables are established, before any later command can fail:
 
 ```bash
 set -euo pipefail
 export REPO_ROOT="$PWD"
 export TMP_BASE="${TMPDIR:-/tmp}"
 export TMP_BASE="${TMP_BASE%/}"
-export ACCEPTANCE_ROOT="$(mktemp -d "$TMP_BASE/mfa-plan4-manual.XXXXXX")"
+: "${PROFILE_GUARD:?set PROFILE_GUARD to a pre-provisioned session-owned helper}"
+if [ ! -x "$PROFILE_GUARD" ]; then
+  printf '%s\n' 'BLOCKED: pre-provisioned PROFILE_GUARD is unavailable' >&2
+  exit 1
+fi
+
+ACCEPTANCE_ROOT="$(mktemp -d "$TMP_BASE/mfa-plan4-manual.XXXXXX")"
+export ACCEPTANCE_ROOT
 export TEST_HOME="$ACCEPTANCE_ROOT/home"
 export WORKSPACE="$ACCEPTANCE_ROOT/workspace"
 export MYNETDIARY_INBOX="$WORKSPACE/inbox/mynetdiary"
 export HEVY_INBOX="$WORKSPACE/inbox/hevy"
+export PROFILE_GUARD_ROOT="$ACCEPTANCE_ROOT"
+export PROFILE_GUARD_MANIFEST="$ACCEPTANCE_ROOT/profile-guard.tsv"
+export PROFILE_GUARD_BACKUP_MANIFEST="$ACCEPTANCE_ROOT/profile-guard-before.tsv"
+
+record_blocked() {
+  local reason="$1"
+  printf 'BLOCKED: %s\n' "$reason" >&2
+  if [ -n "${ACCEPTANCE_ROOT:-}" ] && [ -d "${ACCEPTANCE_ROOT:-}" ]; then
+    printf 'BLOCKED\t%s\n' "$reason" \
+      >"$ACCEPTANCE_ROOT/cleanup-status.tsv" || true
+  fi
+}
+
+validate_profile_guard_manifest() {
+  local expected_footer="$1"
+  python3 - "$PROFILE_GUARD_MANIFEST" "$expected_footer" <<'PY'
+import re
+import sys
+
+manifest, expected_footer = sys.argv[1:]
+labels = [
+    "application-support",
+    "caches",
+    "webkit",
+    "preferences",
+    "saved-application-state",
+    "http-storages",
+]
+
+
+def fail(reason):
+    print(f"BLOCKED: profile-guard.tsv {reason}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+try:
+    with open(manifest, encoding="utf-8", newline="") as handle:
+        lines = handle.read().splitlines()
+except OSError:
+    fail("cannot be read")
+
+if len(lines) != 8:
+    fail("must contain one header, six root rows, and one footer")
+if lines[0] != "label\tstate\tdigest\tfiles\trestored":
+    fail("header is not exact")
+
+for index, label in enumerate(labels, start=1):
+    fields = lines[index].split("\t")
+    if len(fields) != 5:
+        fail(f"row {index} must have five TSV fields")
+    if fields[0] != label:
+        fail(f"row {index} has an unexpected label")
+    if fields[1] not in {"present", "absent"}:
+        fail(f"row {index} has an invalid state")
+    if re.fullmatch(r"[0-9a-f]{64}", fields[2]) is None:
+        fail(f"row {index} has an invalid lowercase SHA-256 digest")
+    if re.fullmatch(r"[0-9]+", fields[3]) is None:
+        fail(f"row {index} has an invalid file count")
+    if fields[4] != expected_footer:
+        fail(f"row {index} has the wrong restored flag")
+
+if lines[-1] != f"restored={expected_footer}":
+    fail("footer is not exact")
+PY
+}
+
+compare_profile_guard_manifests() {
+  python3 - "$PROFILE_GUARD_BACKUP_MANIFEST" "$PROFILE_GUARD_MANIFEST" <<'PY'
+import sys
+
+before_path, after_path = sys.argv[1:]
+
+
+def read_rows(path):
+    with open(path, encoding="utf-8", newline="") as handle:
+        return [line.split("\t") for line in handle.read().splitlines()]
+
+
+try:
+    before = read_rows(before_path)
+    after = read_rows(after_path)
+except OSError:
+    print("BLOCKED: profile-guard backup comparison cannot be read", file=sys.stderr)
+    raise SystemExit(1)
+
+if len(before) != 8 or len(after) != 8:
+    print("BLOCKED: profile-guard backup comparison has the wrong line count", file=sys.stderr)
+    raise SystemExit(1)
+
+for index in range(1, 7):
+    if before[index][:4] != after[index][:4]:
+        print(
+            f"BLOCKED: profile-guard row {index} changed during restore",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+PY
+}
+
+cleanup_acceptance() {
+  local original_status="$?"
+  local cleanup_status="$original_status"
+  trap - EXIT
+
+  finish_blocked() {
+    local reason="$1"
+    record_blocked "$reason"
+    if [ "$cleanup_status" -eq 0 ]; then
+      exit 1
+    fi
+    exit "$cleanup_status"
+  }
+
+  if [ -z "${ACCEPTANCE_ROOT:-}" ] || \
+     [ -z "${PROFILE_GUARD_MANIFEST:-}" ]; then
+    finish_blocked "acceptance root or profile-guard manifest is unset"
+  fi
+  if [ ! -f "$PROFILE_GUARD_MANIFEST" ]; then
+    finish_blocked \
+      "profile-guard backup manifest is missing; acceptance root retained"
+  fi
+  if ! "$PROFILE_GUARD" restore; then
+    finish_blocked "profile-guard restore failed; acceptance root retained"
+  fi
+  if ! validate_profile_guard_manifest true; then
+    finish_blocked \
+      "profile-guard restore verification failed; acceptance root retained"
+  fi
+  if [ ! -f "$PROFILE_GUARD_BACKUP_MANIFEST" ]; then
+    finish_blocked \
+      "profile-guard backup record is missing; acceptance root retained"
+  fi
+  if ! compare_profile_guard_manifests; then
+    finish_blocked \
+      "profile-guard digest/state comparison failed; acceptance root retained"
+  fi
+
+  if ! test -n "$ACCEPTANCE_ROOT"; then
+    finish_blocked "refusing to delete an empty acceptance root"
+  fi
+  case "$ACCEPTANCE_ROOT" in
+    "$TMP_BASE"/mfa-plan4-manual.*) ;;
+    *) finish_blocked "refusing to delete an unexpected acceptance root" ;;
+  esac
+  if ! rm -rf -- "$ACCEPTANCE_ROOT"; then
+    finish_blocked "acceptance-root deletion failed; root retained"
+  fi
+  if [ -e "$ACCEPTANCE_ROOT" ]; then
+    finish_blocked "acceptance root still exists after deletion"
+  fi
+  exit "$original_status"
+}
+
+trap cleanup_acceptance EXIT
+
 mkdir -p "$TEST_HOME" "$MYNETDIARY_INBOX" "$HEVY_INBOX"
 ```
 
@@ -78,32 +243,52 @@ Before launch:
    must report this exact output:
    `verified 7 BIFF fixtures and 2 CSV fixtures; privacy scan passed`.
 
-2. Before starting the run, the operator must pre-provision a session-owned
-   six-root hash-guard helper implementing the approved backup/restore
-   protocol. The helper is not a repository dependency and must not be
-   improvised during the run. It must protect these labels without printing
-   their resolved absolute paths:
+2. Before the first `PROFILE_GUARD` invocation, configure the pre-provisioned
+   session-owned six-root hash-guard helper for `PROFILE_GUARD_ROOT` and
+   `PROFILE_GUARD_MANIFEST`. The helper is not a repository dependency and must
+   not be improvised during the run. It must protect these labels without
+   printing their resolved absolute paths:
    `application-support`, `caches`, `webkit`, `preferences`,
-   `saved-application-state`, and `http-storages`. The guard must record a
-   deterministic digest, file count/state, and a per-root `restored` flag in
-   `$ACCEPTANCE_ROOT/profile-guard.tsv`.
+   `saved-application-state`, and `http-storages`.
+
+   The exact `$ACCEPTANCE_ROOT/profile-guard.tsv` contract is defined before
+   the first invocation. It is UTF-8 TSV with no blank lines or extra fields:
+
+   - line 1 is exactly
+     `label\tstate\tdigest\tfiles\trestored`;
+   - lines 2–7 are exactly one row for each label, in this order:
+     `application-support`, `caches`, `webkit`, `preferences`,
+     `saved-application-state`, `http-storages`;
+   - every root row has five fields: the exact label; `state` equal to
+     `present` or `absent`; `digest` equal to a lowercase 64-character
+     SHA-256 digest of the deterministic root snapshot; `files` equal to a
+     non-negative decimal file count; and `restored` equal to the current
+     restore state;
+   - immediately after a successful `backup`, every root row has
+     `restored=false` and the final line is exactly `restored=false`;
+   - only after a successful `restore` and post-restore verification may every
+     root row change to `restored=true`; the final line must then be exactly
+     `restored=true`;
+   - `label`, `state`, `digest`, and `files` must remain byte-for-byte equal
+     to the retained pre-restore manifest; only the per-row `restored` fields
+     and final footer change from `false` to `true`;
+   - the file has exactly eight lines total, with no paths, source bytes, or
+     other fields. The setup block's
+     `validate_profile_guard_manifest` function enforces this contract for
+     both footer states.
+
+   The guard backup is session-owned and ephemeral; it must verify the backup
+   digest before the application starts. If the helper is absent, cannot be
+   configured for this root and manifest, backup fails, the manifest violates
+   this contract, or restoration cannot be verified, the single `EXIT` handler
+   records `BLOCKED` and retains the acceptance root; do not improvise a
+   replacement or change permissions.
 
    ```bash
-   : "${PROFILE_GUARD:?set PROFILE_GUARD to a pre-provisioned session-owned helper}"
-   if [ ! -x "$PROFILE_GUARD" ]; then
-     printf '%s\n' 'BLOCKED: pre-provisioned PROFILE_GUARD is unavailable' >&2
-     exit 1
-   fi
    "$PROFILE_GUARD" backup
-   trap '"$PROFILE_GUARD" restore' EXIT
+   validate_profile_guard_manifest false
+   cp "$PROFILE_GUARD_MANIFEST" "$PROFILE_GUARD_BACKUP_MANIFEST"
    ```
-
-   The helper must be configured for this `$ACCEPTANCE_ROOT` and manifest
-   before `backup` is called. The guard backup is session-owned and ephemeral;
-   it must verify the backup digest before the application starts. If the
-   helper is absent, cannot be configured for this root, backup fails, or
-   restoration cannot be verified, record `BLOCKED` and stop; do not improvise
-   a replacement or change permissions.
 
 3. Stage only the synthetic files:
 
@@ -213,14 +398,17 @@ Perform these UI steps exactly:
    provider merely because a capability is present.
 7. If an installed module shows `Update`, click only that module's explicit
    `Update` control and wait for the catalog to reload. Confirm that the module
-   reports the selected bundled version/hash and that unrelated modules,
-   disabled modules, custom packages, and provider selections are unchanged.
+   visibly shows the selected bundled version and its selected/active state;
+   record the exact version and state text shown by the UI. Do not assert that
+   the UI displays a SHA-256 hash: package SHA-256 verification is separate
+   evidence in Section 3. Confirm that unrelated modules, disabled modules,
+   custom packages, and provider selections are unchanged.
    Never perform a global or automatic update.
 8. If no bundled module shows `Update` at this fresh artifact baseline, record
    `N/A — no update candidate advertised` and rely on the automated explicit
    update tests; do not claim that an update was exercised.
 9. If the module catalog reports `Incompatible`, `Error`, or an unexpected
-   package hash, stop the acceptance run and record the typed state.
+   selected version/state, stop the acceptance run and record the typed state.
 
 ## 6. Initial dashboard state and no-restart ingestion visibility
 
@@ -366,35 +554,34 @@ Provider and phase-event steps:
 
 ## 10. Cleanup and privacy verification
 
-Run cleanup even after a failure. Restore and verify the guarded profile before
-deleting the acceptance root:
+The `cleanup_acceptance` `EXIT` handler installed in Section 1 is the sole
+cleanup path. It is installed before directory creation, profile backup, app
+launch, or any other later command that runs with `set -e`; therefore both a
+normal `exit 0` and an early failure enter the same handler. Do not add another
+trap, invoke `restore` manually, clear the trap elsewhere, or run a second
+`rm -rf` sequence.
 
-```bash
-"$PROFILE_GUARD" restore
-python3 - "$ACCEPTANCE_ROOT/profile-guard.tsv" <<'PY'
-import sys
+On every exit, the handler performs this order:
 
-manifest = sys.argv[1]
-with open(manifest, encoding="utf-8") as handle:
-    rows = [line.rstrip("\n").split("\t") for line in handle]
-assert rows[0] == ["label", "state", "digest", "files", "restored"]
-assert rows[-1] == ["restored=true"]
-assert all(row[4] == "true" for row in rows[1:-1])
-PY
-trap - EXIT
-test -n "${ACCEPTANCE_ROOT:-}"
-case "$ACCEPTANCE_ROOT" in
-  "$TMP_BASE"/mfa-plan4-manual.*) ;;
-  *) printf '%s\n' 'refusing to delete an unexpected acceptance root' >&2; exit 1 ;;
-esac
-rm -rf -- "$ACCEPTANCE_ROOT"
-test ! -e "$ACCEPTANCE_ROOT"
-```
+1. retain the original exit status and disable only its own trap to prevent
+   recursion;
+2. require the acceptance root and profile-guard manifest to be set and
+   require the manifest to exist; otherwise emit and record `BLOCKED` and
+   retain the root;
+3. invoke the guard's `restore`, then run
+   `validate_profile_guard_manifest true`, which requires every root row and
+   the exact `restored=true` footer; if either step fails, emit and record
+   `BLOCKED` and retain the root;
+4. run the existing non-empty acceptance-root check and the exact
+   `$TMP_BASE/mfa-plan4-manual.*` prefix check;
+5. only after the successful restore/verification and both path checks, delete
+   the acceptance root and verify that it no longer exists; a deletion or
+   absence-check failure emits and records `BLOCKED` and does not claim cleanup.
 
-The explicit restore must return exit `0`, the manifest check must return exit
-`0`, and only then may the trap be cleared and the validated temporary root be
-deleted. If any restore/manifest/prefix check fails, leave the root intact,
-record `BLOCKED`, and do not claim cleanup.
+If the guard backup fails before producing a manifest, the handler does not
+attempt an unverified restore; it records `BLOCKED` and retains the root. Any
+other early failure with a manifest present still follows restore, manifest
+verification, path checks, and conditional deletion in that order.
 
 Before finalizing the record:
 
@@ -438,3 +625,10 @@ Overall status for the current checkout: **NOT RUN**. Do not convert this to
 non-synthetic input, profile-guard mismatch, raw/private data exposure, or
 unexplained artifact/hash mismatch is a stop condition and must be recorded as
 `BLOCKED` or `FAIL` with no claim of Plan 4 native acceptance.
+
+After completing the pass/fail record, execute this as the final command in the
+same shell so the sole handler performs the verified cleanup:
+
+```bash
+exit 0
+```
