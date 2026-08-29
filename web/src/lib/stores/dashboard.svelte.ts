@@ -13,7 +13,12 @@ export interface DashboardStoreState {
 export interface DashboardStore {
   state: DashboardStoreState;
   load(moduleId: string, pageId: string, range?: DateRangeView): Promise<void>;
+  syncInitialRange(range: DateRangeView): DateRangeView;
   markStale(): void;
+}
+
+function sameRange(left: DateRangeView, right: DateRangeView): boolean {
+  return left.start === right.start && left.end === right.end;
 }
 
 export function createDashboardStore(
@@ -28,6 +33,7 @@ export function createDashboardStore(
     stale: false,
   });
   let requestGeneration = 0;
+  let backendInitialRange = initialRange ? { ...initialRange } : null;
 
   async function load(
     moduleId: string,
@@ -64,9 +70,20 @@ export function createDashboardStore(
     }
   }
 
+  function syncInitialRange(nextRange: DateRangeView): DateRangeView {
+    const shouldAdopt =
+      state.range === null ||
+      (backendInitialRange !== null &&
+        sameRange(state.range, backendInitialRange));
+    backendInitialRange = { ...nextRange };
+    if (shouldAdopt) state.range = { ...nextRange };
+    if (state.range === null) return { ...nextRange };
+    return { ...state.range };
+  }
+
   function markStale(): void {
     state.stale = true;
   }
 
-  return { state, load, markStale };
+  return { state, load, syncInitialRange, markStale };
 }

@@ -8,8 +8,7 @@
   import SourcesQualityPage from '../pages/SourcesQualityPage.svelte';
   import { message } from '../i18n';
   import type { AppTransport } from '../transport';
-  import type { NavigationItemView } from '../types';
-  import type { DataChangedEvent } from '../types';
+  import type { DataChangedEvent, DateRangeView, NavigationItemView } from '../types';
   import { createAppStore } from '../stores/app.svelte';
   import { createDashboardStore } from '../stores/dashboard.svelte';
 
@@ -25,25 +24,50 @@
   );
   const locale = $derived(appState.bootstrap?.locale ?? 'en-US');
 
+  function selectedNavigationItem(): NavigationItemView | null {
+    return (
+      appStore.state.navigation?.items.find(
+        (item) => item.pageId === appStore.state.selectedPageId,
+      ) ?? null
+    );
+  }
+
+  function isDashboardPage(
+    item: NavigationItemView | null,
+  ): item is NavigationItemView {
+    return Boolean(
+      item &&
+        item.pageId !== 'sources' &&
+        item.pageId !== 'phases' &&
+        item.pageId !== 'settings',
+    );
+  }
+
+  async function loadSelectedDashboard(initialRange?: DateRangeView): Promise<void> {
+    const current = selectedNavigationItem();
+    const range = initialRange
+      ? dashboardStore.syncInitialRange(initialRange)
+      : dashboardStore.state.range;
+    if (isDashboardPage(current) && range) {
+      await dashboardStore.load(current.moduleId, current.pageId, range);
+    }
+  }
+
   onMount(() => {
     let active = true;
     async function start(): Promise<void> {
       await appStore.load();
       if (!active) return;
-      const item = appStore.state.navigation?.items[0];
-      const initialRange = appStore.state.navigation?.initialRange;
-      if (item && initialRange) await dashboardStore.load(item.moduleId, item.pageId, initialRange);
+      await loadSelectedDashboard(appStore.state.navigation?.initialRange);
       if (!active) return;
       cleanup = await props.transport.subscribeDataChanged((event: DataChangedEvent) => {
         appStore.state.dataChanged = event;
         dashboardStore.markStale();
-        void appStore.load();
-        const current = appStore.state.navigation?.items.find(
-          (candidate) => candidate.pageId === appStore.state.selectedPageId,
-        );
-        if (current && dashboardStore.state.range) {
-          void dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
-        }
+        void (async () => {
+          await appStore.load();
+          if (!active) return;
+          await loadSelectedDashboard(appStore.state.navigation?.initialRange);
+        })();
       });
     }
     void start();
@@ -55,12 +79,7 @@
 
   function openPage(item: NavigationItemView): void {
     appStore.select(item.pageId, item.moduleId);
-    if (
-      item.pageId !== 'sources' &&
-      item.pageId !== 'phases' &&
-      item.pageId !== 'settings' &&
-      dashboardStore.state.range
-    ) {
+    if (isDashboardPage(item) && dashboardStore.state.range) {
       void dashboardStore.load(item.moduleId, item.pageId, dashboardStore.state.range);
     }
   }
@@ -78,16 +97,7 @@
 
   async function refresh(): Promise<void> {
     await appStore.refresh();
-    const current = selectedItem;
-    if (
-      current &&
-      current.pageId !== 'sources' &&
-      current.pageId !== 'phases' &&
-      current.pageId !== 'settings' &&
-      dashboardStore.state.range
-    ) {
-      await dashboardStore.load(current.moduleId, current.pageId, dashboardStore.state.range);
-    }
+    await loadSelectedDashboard(appStore.state.navigation?.initialRange);
   }
 
   function openSettings(): void {

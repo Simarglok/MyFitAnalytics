@@ -13,6 +13,11 @@
   let start = dashboardStore.state.range?.start ?? '';
   let end = dashboardStore.state.range?.end ?? '';
   let rangeError = '';
+  let rangeDirty = false;
+
+  function markRangeDirty(): void {
+    rangeDirty = true;
+  }
 
   async function applyRange(): Promise<void> {
     if (!start || !end || start > end) {
@@ -21,12 +26,13 @@
     }
     rangeError = '';
     await dashboardStore.load(item.moduleId, item.pageId, { start, end });
+    rangeDirty = false;
   }
 
 
   $: page = dashboardStore.state.page;
   $: dashboardError = dashboardStore.state.error;
-  $: if (dashboardStore.state.range && !start && !end) {
+  $: if (dashboardStore.state.range && !rangeDirty) {
     start = dashboardStore.state.range.start;
     end = dashboardStore.state.range.end;
   }
@@ -44,8 +50,8 @@
   </div>
 
   <form class="range-controls" aria-label="Dashboard date range" on:submit|preventDefault={() => void applyRange()}>
-    <label>From <input aria-label="Range start" type="date" bind:value={start} /></label>
-    <label>To <input aria-label="Range end" type="date" bind:value={end} /></label>
+    <label>From <input aria-label="Range start" type="date" bind:value={start} on:input={markRangeDirty} /></label>
+    <label>To <input aria-label="Range end" type="date" bind:value={end} on:input={markRangeDirty} /></label>
     <button type="submit">Apply range</button>
   </form>
   {#if rangeError}<p class="error-detail" role="alert">{rangeError}</p>{/if}

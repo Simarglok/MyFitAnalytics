@@ -44,6 +44,9 @@ const page = {
   },
 };
 
+const initialRange = { start: "2026-01-01", end: "2026-01-31" };
+const rebasedRange = { start: "2026-01-04", end: "2026-02-03" };
+
 describe("DashboardPage", () => {
   it("renders a dashboard response that arrives after the page mounts", async () => {
     const target = document.createElement("div");
@@ -82,6 +85,85 @@ describe("DashboardPage", () => {
     await vi.waitFor(() =>
       expect(target.textContent).toContain("Dashboard data may be stale"),
     );
+    unmount(app);
+  });
+
+  it("synchronizes clean date controls when the applied store range changes", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const transport = new MockTransport({ dashboards: { overview: page } });
+    const dashboardStore = createDashboardStore(transport, initialRange);
+    const app = mount(DashboardPage, {
+      target,
+      props: { item, dashboardStore },
+    });
+
+    await dashboardStore.load("base", "overview");
+    await dashboardStore.load("base", "overview", rebasedRange);
+
+    await vi.waitFor(() => {
+      expect(
+        target.querySelector<HTMLInputElement>('[aria-label="Range start"]')
+          ?.value,
+      ).toBe(rebasedRange.start);
+      expect(
+        target.querySelector<HTMLInputElement>('[aria-label="Range end"]')
+          ?.value,
+      ).toBe(rebasedRange.end);
+    });
+    unmount(app);
+  });
+
+  it("does not overwrite a dirty date control when the store range changes", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const transport = new MockTransport({ dashboards: { overview: page } });
+    const dashboardStore = createDashboardStore(transport, initialRange);
+    const app = mount(DashboardPage, {
+      target,
+      props: { item, dashboardStore },
+    });
+
+    await dashboardStore.load("base", "overview");
+    const start = target.querySelector<HTMLInputElement>(
+      '[aria-label="Range start"]',
+    );
+    if (!start) throw new Error("range start input was not rendered");
+    start.value = "2025-12-01";
+    start.dispatchEvent(new Event("input", { bubbles: true }));
+
+    await dashboardStore.load("base", "overview", rebasedRange);
+
+    await vi.waitFor(() => expect(start.value).toBe("2025-12-01"));
+    unmount(app);
+  });
+
+  it("keeps an applied custom range visible when the store range changes", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const transport = new MockTransport({ dashboards: { overview: page } });
+    const dashboardStore = createDashboardStore(transport, initialRange);
+    const app = mount(DashboardPage, {
+      target,
+      props: { item, dashboardStore },
+    });
+
+    await dashboardStore.load("base", "overview");
+    await dashboardStore.load("base", "overview", {
+      start: "2025-12-01",
+      end: "2025-12-31",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        target.querySelector<HTMLInputElement>('[aria-label="Range start"]')
+          ?.value,
+      ).toBe("2025-12-01");
+      expect(
+        target.querySelector<HTMLInputElement>('[aria-label="Range end"]')
+          ?.value,
+      ).toBe("2025-12-31");
+    });
     unmount(app);
   });
 });
