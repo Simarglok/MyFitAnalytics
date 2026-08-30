@@ -48,12 +48,20 @@ export function createAppStore(transport: AppTransport) {
       state.navigation = navigation;
       state.ingestionStatus = ingestionStatus;
       state.loading = false;
-      const selected =
-        navigation.items.find((item) => item.pageId === state.selectedPageId) ??
-        navigation.items[0];
+      const selected = navigation.items.find(
+        (item) => item.pageId === state.selectedPageId,
+      );
       if (selected) {
         state.selectedPageId = selected.pageId;
         state.selectedModuleId = selected.moduleId;
+      } else if (
+        !["settings", "phases", "sources"].includes(state.selectedPageId)
+      ) {
+        const fallback = navigation.items[0];
+        if (fallback) {
+          state.selectedPageId = fallback.pageId;
+          state.selectedModuleId = fallback.moduleId;
+        }
       }
     } catch (error: unknown) {
       if (generation !== loadGeneration) return;

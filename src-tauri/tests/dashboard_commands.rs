@@ -1,10 +1,11 @@
 use mfa_config::{AppSettings, SettingsStore};
-use mfa_contracts::{DashboardBlock, LocalDate};
+use mfa_contracts::{AvailabilityState, DashboardBlock, LocalDate};
 use mfa_dashboard_host::DashboardOutput;
 use mfa_module_host::PackageInstaller;
 use myfitanalytics::commands::{
-    choose_workspace_root_inner, delete_phase_event, delete_phase_event_inner, get_dashboard_inner,
-    get_navigation_inner, list_phase_events, list_phase_events_inner, save_phase_event_inner,
+    choose_workspace_root_inner, delete_phase_event, delete_phase_event_inner,
+    get_bootstrap_state_inner, get_dashboard_inner, get_navigation_inner, list_phase_events,
+    list_phase_events_inner, save_phase_event_inner, select_provider_inner,
 };
 use myfitanalytics::dialogs::DialogPort;
 use myfitanalytics::view_models::{DateRangeView, PhaseEventInput};
@@ -40,6 +41,32 @@ fn state() -> (myfitanalytics::AppState, TempDir) {
             &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist/modules/base.mfadashboard"),
         )
         .unwrap();
+    SettingsStore::new(config_root.join("settings.json"))
+        .save(&AppSettings::default())
+        .unwrap();
+    let state = myfitanalytics::AppState::from_roots_with_core_catalog(
+        &config_root,
+        &module_root,
+        br#"{"locale":"en","namespace":"core","messages":{"app.title":"MyFitAnalytics"}}"#,
+    )
+    .unwrap();
+    (state, root)
+}
+
+fn state_with_bundled_sources() -> (myfitanalytics::AppState, TempDir) {
+    let root = TempDir::new().unwrap();
+    let config_root = root.path().join("config");
+    let module_root = root.path().join("modules");
+    fs::create_dir_all(&config_root).unwrap();
+    let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist/modules");
+    let installer = PackageInstaller::new(&module_root);
+    for name in [
+        "hevy.mfasource",
+        "mynetdiary.mfasource",
+        "base.mfadashboard",
+    ] {
+        installer.install(&package_root.join(name)).unwrap();
+    }
     SettingsStore::new(config_root.join("settings.json"))
         .save(&AppSettings::default())
         .unwrap();
@@ -102,6 +129,129 @@ async fn navigation_and_dashboard_commands_return_safe_typed_views() {
     let value: Value = serde_json::to_value(&dashboard).unwrap();
     assert!(value.get("rawSnapshot").is_none());
     assert!(value.to_string().len() < 100_000);
+}
+
+#[tokio::test]
+async fn missing_provider_selection_is_reported_in_navigation_and_dashboard() {
+    let (state, _root) = state();
+    let navigation = get_navigation_inner(&state).await.unwrap();
+    assert!(!navigation.items.is_empty());
+    for item in navigation.items {
+        assert_eq!(
+            item.availability.state,
+            AvailabilityState::MissingCapability
+        );
+        assert_eq!(
+            item.availability.action.as_deref(),
+            Some("dashboard.action.configure_source")
+        );
+    }
+
+    let dashboard = get_dashboard_inner(
+        "base".to_owned(),
+        "overview".to_owned(),
+        fixture_range(),
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dashboard.availability.state,
+        AvailabilityState::MissingCapability
+    );
+    assert_eq!(
+        dashboard.availability.action.as_deref(),
+        Some("dashboard.action.configure_source")
+    );
+}
+
+#[tokio::test]
+async fn explicit_provider_selection_reports_waiting_for_data() {
+    let (state, _root) = state_with_bundled_sources();
+    let bootstrap_before = get_bootstrap_state_inner(&state).await.unwrap();
+    assert!(bootstrap_before.active_providers.is_empty());
+
+    let navigation_before = get_navigation_inner(&state).await.unwrap();
+    for item in navigation_before.items {
+        assert_eq!(
+            item.availability.state,
+            AvailabilityState::MissingCapability
+        );
+        assert_eq!(
+            item.availability.action.as_deref(),
+            Some("dashboard.action.configure_source")
+        );
+    }
+    let dashboard_before = get_dashboard_inner(
+        "base".to_owned(),
+        "overview".to_owned(),
+        fixture_range(),
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dashboard_before.availability.state,
+        AvailabilityState::MissingCapability
+    );
+    assert_eq!(
+        dashboard_before.availability.action.as_deref(),
+        Some("dashboard.action.configure_source")
+    );
+    let bootstrap_after_probe = get_bootstrap_state_inner(&state).await.unwrap();
+    assert!(bootstrap_after_probe.active_providers.is_empty());
+
+    for (capability, provider) in [
+        ("activity.days", "mynetdiary"),
+        ("activity.events", "mynetdiary"),
+        ("heart_rate.observations", "mynetdiary"),
+        ("body.fat_percentage", "hevy"),
+        ("body.weight", "hevy"),
+        ("nutrition.items", "mynetdiary"),
+        ("strength.sessions", "hevy"),
+        ("strength.sets", "hevy"),
+    ] {
+        select_provider_inner(capability.to_owned(), provider.to_owned(), &state)
+            .await
+            .unwrap();
+    }
+
+    let bootstrap_after_selection = get_bootstrap_state_inner(&state).await.unwrap();
+    assert_eq!(bootstrap_after_selection.active_providers.len(), 8);
+    assert_eq!(
+        bootstrap_after_selection.active_providers["activity.days"],
+        "mynetdiary"
+    );
+    assert_eq!(
+        bootstrap_after_selection.active_providers["body.weight"],
+        "hevy"
+    );
+
+    let navigation = get_navigation_inner(&state).await.unwrap();
+    for item in navigation.items {
+        assert_eq!(item.availability.state, AvailabilityState::WaitingForData);
+        assert_eq!(
+            item.availability.action.as_deref(),
+            Some("dashboard.action.import_data")
+        );
+    }
+
+    let dashboard = get_dashboard_inner(
+        "base".to_owned(),
+        "overview".to_owned(),
+        fixture_range(),
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dashboard.availability.state,
+        AvailabilityState::WaitingForData
+    );
+    assert_eq!(
+        dashboard.availability.action.as_deref(),
+        Some("dashboard.action.import_data")
+    );
 }
 
 #[tokio::test]

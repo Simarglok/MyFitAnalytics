@@ -95,6 +95,7 @@ export const CORE_ENGLISH_CATALOG = {
   "quality.empty": "No quality issues found.",
   "quality.retry": "Retry import",
   "quality.retrying": "Retry queued",
+  "quality.retry_error": "Unable to retry import",
   "quality.status": "Status",
   "quality.severity": "Severity",
   "quality.message": "Message",

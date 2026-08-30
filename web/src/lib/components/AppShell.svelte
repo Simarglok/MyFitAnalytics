@@ -53,6 +53,11 @@
     }
   }
 
+  async function refreshAfterSettingsMutation(): Promise<void> {
+    await appStore.load();
+    await loadSelectedDashboard(appStore.state.navigation?.initialRange);
+  }
+
   onMount(() => {
     let active = true;
     async function start(): Promise<void> {
@@ -159,7 +164,10 @@
     {:else if appState.selectedPageId === 'phases'}
       <PhaseEventsPage transport={props.transport} />
     {:else if appState.selectedPageId === 'settings'}
-      <SettingsPage transport={props.transport} />
+      <SettingsPage
+        transport={props.transport}
+        onMutation={refreshAfterSettingsMutation}
+      />
     {:else if selectedItem}
       <DashboardPage
         item={selectedItem}

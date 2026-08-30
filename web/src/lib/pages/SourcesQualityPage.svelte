@@ -8,7 +8,8 @@
 
   let items: QualityItem[] = [];
   let loading = true;
-  let error: TransportError | null = null;
+  let listError: TransportError | null = null;
+  let retryError: TransportError | null = null;
   let retrying = new Set<string>();
 
   onMount(() => {
@@ -17,11 +18,12 @@
 
   async function reload(): Promise<void> {
     loading = true;
-    error = null;
+    listError = null;
+    retryError = null;
     try {
       items = await transport.listQualityItems();
     } catch (cause: unknown) {
-      error = normalizeTransportError(cause);
+      listError = normalizeTransportError(cause);
     } finally {
       loading = false;
     }
@@ -29,11 +31,12 @@
 
   async function retry(item: QualityItem): Promise<void> {
     retrying = new Set(retrying).add(item.id);
+    retryError = null;
     try {
       if (item.assetId) await transport.retryAsset(item.assetId);
       await reload();
     } catch (cause: unknown) {
-      error = normalizeTransportError(cause);
+      retryError = normalizeTransportError(cause);
     } finally {
       const next = new Set(retrying);
       next.delete(item.id);
@@ -52,11 +55,16 @@
   </div>
   {#if loading}
     <p aria-live="polite">{message('dashboard.loading')}</p>
-  {:else if error}
-    <div role="alert" class="error"><code>{error.code}</code><p>{message('quality.error')}</p></div>
-  {:else if items.length === 0}
-    <p class="muted">{message('quality.empty')}</p>
   {:else}
+    {#if listError}
+      <div role="alert" class="error" data-list-error><code>{listError.code}</code><p>{message('quality.error')}</p></div>
+    {/if}
+    {#if retryError}
+      <div role="alert" class="error" data-retry-error><code>{retryError.code}</code><p>{message('quality.retry_error')}</p></div>
+    {/if}
+    {#if items.length === 0 && !listError}
+      <p class="muted">{message('quality.empty')}</p>
+    {:else if items.length > 0}
     <div class="quality-table-wrap">
       <table>
         <thead><tr><th scope="col">{message('quality.severity')}</th><th scope="col">{message('quality.message')}</th><th scope="col">{message('quality.status')}</th><th scope="col">Action</th></tr></thead>
@@ -70,5 +78,6 @@
         </tbody>
       </table>
     </div>
+    {/if}
   {/if}
 </section>

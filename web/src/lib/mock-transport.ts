@@ -74,24 +74,37 @@ export class MockTransport implements AppTransport {
   private readonly options: MockTransportOptions;
   private catalogState: ModuleCatalogEntry[];
   private readonly phaseEvents: PhaseEventView[];
+  private activeProvidersState: Record<string, string>;
+  private bootstrapLoaded = false;
   readonly calls: string[] = [];
 
   constructor(options: MockTransportOptions = {}) {
     this.options = options;
     this.catalogState = options.catalog ?? [];
     this.phaseEvents = options.phaseEvents ? [...options.phaseEvents] : [];
+    this.activeProvidersState = {
+      ...(options.bootstrap?.activeProviders ?? {}),
+    };
   }
 
   async getBootstrapState(): Promise<BootstrapState> {
     if (this.options.error !== undefined)
       throw normalizeTransportError(this.options.error);
-    if (this.options.bootstrapPromise) return this.options.bootstrapPromise;
-    if (this.options.bootstrap) return this.options.bootstrap;
+    const bootstrap = this.options.bootstrapPromise
+      ? await this.options.bootstrapPromise
+      : (this.options.bootstrap ?? {
+          productName: "MyFitAnalytics",
+          locale: "en-US",
+          activeProviders: {},
+          modules: this.options.modules ?? [],
+        });
+    if (!this.bootstrapLoaded) {
+      this.activeProvidersState = { ...bootstrap.activeProviders };
+      this.bootstrapLoaded = true;
+    }
     return {
-      productName: "MyFitAnalytics",
-      locale: "en-US",
-      activeProviders: {},
-      modules: this.options.modules ?? [],
+      ...bootstrap,
+      activeProviders: { ...this.activeProvidersState },
     };
   }
 
@@ -293,7 +306,11 @@ export class MockTransport implements AppTransport {
     if (this.options.error !== undefined)
       throw normalizeTransportError(this.options.error);
     this.calls.push(`selectProvider:${capability}:${moduleId}`);
-    return { activeProviders: { [capability]: moduleId } };
+    this.activeProvidersState = {
+      ...this.activeProvidersState,
+      [capability]: moduleId,
+    };
+    return { activeProviders: { ...this.activeProvidersState } };
   }
 
   async selectProvider(
@@ -303,10 +320,14 @@ export class MockTransport implements AppTransport {
     if (this.options.error !== undefined)
       throw normalizeTransportError(this.options.error);
     this.calls.push(`selectProvider:${capability}:${moduleId}`);
+    this.activeProvidersState = {
+      ...this.activeProvidersState,
+      [capability]: moduleId,
+    };
     return {
       capability,
       moduleId,
-      activeProviders: { [capability]: moduleId },
+      activeProviders: { ...this.activeProvidersState },
     };
   }
 

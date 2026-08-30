@@ -4,19 +4,176 @@
 
 This file records the Plan 4 analytics/dashboard work, its non-foreground
 production-path gate, historical packaged-native acceptance, and the current
-HEAD verification status. The automated Rust/web gates, deterministic package
-checks, and fresh app/DMG build checks are green at the current HEAD. The
-approved current packaged-native criterion is the manual procedure in
-`docs/testing/plan4-packaged-native-manual.md`; it is **NOT RUN** for the
-authoritative current HEAD, so no current interactive assertions or screenshots
-are claimed. The separate XCUITest contract is deferred in
+Draft verification status. The previously approved Settings hydration and
+fail-closed profile guard/runbook corrections are historical records from source
+revision `41bbf5f686bb996000c424064913a123c6d19987`. The earlier provider
+correction at `892e1c8ea6ce1ce751a56df4558d11656f5e1f2c` and its
+full/package/DMG/hygiene evidence are historical and labeled separately below.
+The current bounded UI correction was verified against baseline
+`8ea3f0774a46dc24a3a90bc1e3cc6183ddde6261` and parent
+`bed42a76179efbc9cebe1600eac8d58cf2a1ac3e`; no future amended hash is used as
+evidence. Historical product/package evidence remains separately labeled.
+
+**Authorization note (2026-08-31):** For the exact proposed replacement, the
+human replied `Разрешаю`. This replaces only the old native “Update clears
+incompatibility” expectation; all other acceptance requirements and the
+genuine-incompatibility automated tests remain unchanged.
+
+## Current bounded UI correction checkpoint — 2026-08-31
+
+The bounded UI correction was verified against baseline
+`8ea3f0774a46dc24a3a90bc1e3cc6183ddde6261` (parent
+`bed42a76179efbc9cebe1600eac8d58cf2a1ac3e`). The product/test scope is limited
+to two confirmed defects:
+
+- successful Settings mutations now refresh the AppShell/dashboard snapshot
+  through the existing typed transport, preserve local Settings/Phase/Source
+  page selection and explicit provider consent, and reject older in-flight
+  bootstrap/catalog/workspace responses;
+- a rejected Sources & quality retry now keeps the last-good failure rows and
+  Retry action visible, reports an operation-specific retry error, and keeps
+  list-load errors separate while retaining last-good rows.
+
+The genuine manager RED artifact for the stale shell is
+`/private/tmp/mfa-plan4-ui-manager.GjHxmr/settings-red.log`; it records the
+real mounted AppShell/Settings/Navigation regression before the production
+patch. The implementer RED artifact for rejected Retry is
+`/private/tmp/mfa-plan4-ui-fix.Sy7B6h/sources-quality-red.log` (exit 1: the
+expected failure row rendered zero rows). Post-fix generation-guard mutation
+proofs are retained at
+`/private/tmp/mfa-plan4-ui-fix.Sy7B6h/app-shell-generation-mutation-red.log`
+and
+`/private/tmp/mfa-plan4-ui-fix.Sy7B6h/settings-generation-mutation-red.log`;
+both failed with the older response visible when the relevant guard was
+temporarily removed, and the guards were restored before subsequent checks.
+
+Focused GREEN evidence is 22/22 tests across the three affected files. The
+interim complete web run is 63/63 tests in 13 files; Svelte check reports 0
+errors and the 2 existing `AppShell.svelte` warnings. The fresh logs are under
+`/private/tmp/mfa-plan4-ui-fix.Sy7B6h/`; the manager also retained interim
+copies under `/private/tmp/mfa-plan4-ui-manager.GjHxmr/`. Final manager
+automatic source/web verification passed all 33 intended rows across two
+ledgers: `gates.tsv` passed 21 rows through `workspace`, while
+`continuation-gates.tsv` passed 12 rows from `rustfmt` through
+`diff-unchanged`. The original `disk-before-rustfmt` exit 70 remains preserved
+as an interrupted historical attempt; `head-unchanged` and byte-for-byte
+`diff-unchanged` passed. Separate app/DMG package-gate, DMG audit,
+correction-round hygiene, and corrected native retest remain **PENDING**/
+**NOT RUN**. Scoped cleanup is retained in
+`/private/tmp/mfa-plan4-ui-manager.GjHxmr/passed-test-binaries-cleanup.log` and
+`/private/tmp/mfa-plan4-ui-manager.GjHxmr/debug-build-cache-cleanup.log`: first
+only 19 validated rebuildable Mach-O test executables, then only the isolated
+worktree's regenerable `target/debug/build` cache. No source, dependency,
+profile, backup, release artifact, or evidence log was removed.
+
+The manager-recorded native run remains **FAIL** for this correction boundary:
+after explicit module updates, the module cards showed `Enabled`/no Update,
+but the shell still showed `Not configured` and pending module updates; after
+explicit `Use for activity.days`, Overview showed `WaitingForData` while
+navigation remained `MissingCapability`, with a later explicit Refresh clearing
+the stale shell state. The rejected retry of synthetic `invalid.xls` (the
+missing-required-sheet fixture) produced `retry_failed` and replaced the
+single failure row/action with `Unable to load quality items`. Successful
+native observations were fixture import, Overview coverage `4/31`, stable
+`Attention` equal to 1 after repeated Refresh, one visible quality failure row,
+normal application Quit/process absence, retained synthetic aggregate checks,
+and exact six-root guarded restoration. The full native page walkthrough and
+Phase events CRUD were not completed. The fixed-source native retest staging
+root `/private/tmp/mfa-plan4-ui-retest.aWTdix` was not run and remains
+**NOT RUN/PENDING**, not PASS. The detailed native record is
+`/private/tmp/mfa-plan4-native-approved.P6u51Q/manager-evidence.md`.
+
+Historical verification for source revision `41bbf5f686bb996000c424064913a123c6d19987`:
+
+- The full-gate run passed all 33 rows with exit 0. The workspace reported 266
+  tests and 0 ignored; Vitest reported 56 tests in 13 files; Playwright reported
+  5 passed tests; the profile guard reported 20 passed tests and the independent
+  guard probe reported 2 passed tests; Svelte check reported 0 errors and 2
+  pre-existing warnings.
+- The package-gate run passed all 9 rows with exit 0: fresh app and full DMG,
+  signing with the 2 required entitlements, strict code-signature verification,
+  `hdiutil` verification, exact byte equality for the 3 packaged module
+  resources against `dist`, and unchanged source HEAD.
+- The following artifact hashes are historical records from that revision:
+
+  | Artifact          | SHA-256                                                            |
+  | ----------------- | ------------------------------------------------------------------ |
+  | `.app` executable | `a569639e5e529ffca9a0e658b2965e74be5cd46c1da9f732c861e6c6b792b74b` |
+  | DMG               | `da55e1e49e379520ddc093bccc86b3b6bfd14686c62f005b2527daefbc579f76` |
+  | Base dashboard    | `13a11f972e93c8bfd51b6e371fb8cef62f45a0887bb4339b1f0b93badf89d901` |
+  | Hevy source       | `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379` |
+  | MyNetDiary source | `79a8c96594a95e508fc5cae95057323528d3f180af9e8f3c25bf472b635fc56c` |
+
+The recorded automated/package verification involved no app launch or
+real-profile read/mutation. No new dependency or OS privilege was added, and no
+remote write was performed. Secret filename/key scans had no hits; the marker
+scan matched only existing documentation and a `pnpm` lock-integrity false
+positive.
+
+The approved current packaged-native criterion is the manual procedure in
+`docs/testing/plan4-packaged-native-manual.md`; it remains **NOT RUN/PENDING**
+for the current product, so no packaged-native acceptance, interactive
+assertions, screenshot, or app launch is claimed. The separate app/DMG
+package-gate, DMG audit, and correction-round hygiene also remain **PENDING**.
+A final external Terra High review remains
+**PENDING** and requires new informed authorization; the product is not
+classified Ready.
+
+Historical pre-correction package evidence anchored at
+`bed42a76179efbc9cebe1600eac8d58cf2a1ac3e` remains separate. Its earlier
+packaging attempts are not current evidence: an initial `cargo tauri build
+--bundles app` exited 0; the first full packaging attempt,
+`CI=true cargo tauri build -vv`, exited 1 during sandbox dependency resolution;
+an approved `pnpm install --frozen-lockfile` using the local dependency store
+exited 0 without changing the lockfile or package manifests; the next
+`cargo tauri build --ci -vv` attempt exited 1 during sandbox DMG image creation;
+and an approved cached-dependency packaging rerun exited 0 and produced both
+app and DMG. Its historical app binary SHA-256 was
+`41a90db23fc22755ff13394ddc9940adefe6eb1a9d20764b6ffcebb5cc3f96ed`, and its
+historical DMG SHA-256 was
+`f6e56b75e856a56760b01380fcf1f24919817497b7977e9a45649ed0c44ac97e`.
+Historical offline strict signing/entitlements, bundle-resource equality,
+embedded-app verification, and DMG checksum verification remain historical;
+signing was ad hoc and not notarized.
+
+A prior manual run at `273997a` is historical only: it passed workspace/import
+visibility and a stable one-attention observation but failed Sources & quality
+because the page was empty despite the attention item. That native run remains
+**FAIL** and is never retroactively **PASS**; the old test runner remains
+disabled. The separate XCUITest contract is deferred in
 `docs/superpowers/tasks/2026-08-29-xcuitest-native-acceptance.md`. No
 third-party foreground-control daemon or macOS permission change is required by
 the current criterion. Plan 5 (desktop lifecycle, tray/background behavior, and
 release distribution) remains deferred.
-Native acceptance must use a fresh isolated test profile and checked-in
-synthetic fixtures only; no real export, private record, credential, or remote
-operation is allowed.
+Native acceptance must use the existing OS user with only the exact six roots
+isolated to a fresh empty surface and checked-in synthetic fixtures only; no
+HOME override, real export, private record, credential, or remote operation is
+allowed.
+
+Historical pre-recovery note (2026-08-31): before the approved recovery, the old
+runner was guarded-aborted with exit 1. The audit recorded Application Support
+tree hash mismatching, with 13 files present and no file mtime newer than the
+before-manifest, Preferences matching, Caches and WebKit mismatching, Saved
+Application State and HTTPStorages absent, and the cause unknown. This records
+the pre-recovery state only; it is not native acceptance evidence.
+
+As of 2026-08-31, the app is stopped and the explicitly approved copy-based
+recovery is complete within its authorized scope. The available Application
+Support copy was restored; its normalized tree hash matches the chosen
+available source, **not** the original baseline. Preferences were restored
+hash-identically to the original baseline and passed syntax validation. Live
+Caches and WebKit were first copied and verified; the live originals were then
+moved into private quarantine, while the pre-restore copies remain separately
+retained. Prior live Preferences were preserved the same way before restoration.
+New empty live directories were created. Originally absent Saved Application
+State and HTTPStorages remain absent. All original
+backups, prior recovery variants, the failed-run snapshot, and the original
+before-manifest were preserved unchanged. Independent recheck verified the
+restoration, preserved copies, empty directories, absent roots, and unchanged
+baseline. No deletion or app launch occurred; the cause of the original
+mismatch remains unknown. This recovery does not satisfy the historical
+hash-identical acceptance gate: full original-baseline six-root equivalence
+remains unproven.
 
 All Task 7 runs use checked-in synthetic MyNetDiary and Hevy fixtures, a fresh
 `tempfile` app-data/workspace root, the bundled `.mfasource`/`.mfadashboard`
@@ -45,7 +202,7 @@ packages, and one serial database actor.
 | Typed Tauri-to-Svelte dashboard shell, settings, source quality, refresh, and phase-event UI                                                                          | `web/src/**/*.test.ts`; `src-tauri/tests/{dashboard_commands,ingestion_commands,module_lifecycle_commands}.rs`; 5 Playwright scenarios                                              |
 | Serial production-path import, archive, active snapshots, all six pages, semantic goldens, and DB lifecycle                                                           | `bash scripts/run-dashboard-gate.sh`; `crates/mfa-integration-tests/tests/dashboard_gate.rs`                                                                                        |
 | Ingestion/actionability correction: stable current failures, idempotent Refresh, success clearing, deterministic counts, safe retry/Open Settings, and no auto-update | Focused `mfa-ingestion` and `myfitanalytics` correction tests; typed status/quality transport tests                                                                                 |
-| Packaged-native manual interaction and screenshots                                                                                                                    | `docs/testing/plan4-packaged-native-manual.md`; current result is **NOT RUN**                                                                                                       |
+| Packaged-native manual interaction and screenshots                                                                                                                    | `docs/testing/plan4-packaged-native-manual.md`; current result is **NOT RUN/PENDING**                                                                                               |
 
 The exact historical RED stdout for Tasks 1–6 was not retained in the current
 session database. It is not reconstructed here. The table identifies the
@@ -509,25 +666,129 @@ profile was restored.
 - The same Rust tree had already passed full `cargo test`, Clippy, rustfmt,
   and the production dashboard gate. This final correction was frontend-only.
 
-## Current HEAD verification status — manual acceptance NOT RUN
+## Current product verification status — Draft / INCOMPLETE
 
-The product implementation/verification boundary is commit
-`25c54806d06cb7c46b93cef1d7be5b4b93f9eec5`; this docs-only update is layered
-on top and does not change product code. The implementation and automated
-verification are complete within their stated boundaries. The approved manual
-packaged-native criterion has not been executed on this HEAD, so its result is
-**NOT RUN** and no native pass or screenshot is claimed.
+The persisted Settings hydration and fail-closed profile guard corrections are
+recorded in source revision `41bbf5f686bb996000c424064913a123c6d19987`; the
+full-gate, package-gate, and artifact-hash records at the top of this file are
+historical for that earlier revision. The earlier narrow provider correction at
+`892e1c8ea6ce1ce751a56df4558d11656f5e1f2c` and its fresh full/package/DMG/
+hygiene results are also historical. The current bounded UI correction was
+verified against baseline `8ea3f0774a46dc24a3a90bc1e3cc6183ddde6261` (parent
+`bed42a76179efbc9cebe1600eac8d58cf2a1ac3e`). Final manager automatic source/web
+verification passed all 33 intended rows across `gates.tsv` and
+`continuation-gates.tsv`; the original `disk-before-rustfmt` exit 70 remains a
+separate interrupted attempt, while `head-unchanged` and byte-for-byte
+`diff-unchanged` passed. Separate app/DMG package-gate, DMG audit,
+correction-round hygiene, and corrected native retest remain **PENDING**/
+**NOT RUN**. This status remains **Draft/INCOMPLETE**, not Ready. The recorded
+automated/package verification for `892e1c` involved no app launch, interactive
+assertions, or screenshots. As
+of 2026-08-31,
+the explicitly approved copy-based
+recovery is complete within its authorized scope: the available Application
+Support copy matches its chosen available source after normalization, **not**
+the original baseline; Preferences match the original baseline hash and pass
+syntax validation; live Caches and WebKit were first copied and verified, the
+live originals were then moved into private quarantine, and the pre-restore
+copies remain separately retained; prior live Preferences were preserved the
+same way before restoration; and new empty live directories were created;
+the originally absent roots remain absent; and all recovery variants and
+baselines were preserved unchanged. The independent recheck verified this state.
+The old runner remains disabled, the earlier native run remains **FAIL** and is
+never retroactively **PASS**, and full original-baseline six-root equivalence
+remains unproven. The manager-recorded native run for the pre-fix UI behavior is
+also **FAIL** for stale shell state and rejected Retry hiding the quality row;
+The fixed-source native retest remains **NOT RUN/PENDING**, not PASS. A final
+read-only Terra High review remains **PENDING** pending new informed
+authorization.
 
 ### Implemented
 
-- Focused ingestion RED/GREEN coverage proves that repeated refreshes of one
-  failed asset remain one current attention item, and that successful
-  processing clears the attention item and its failure-code count.
-- The ingestion/UI boundary carries privacy-safe identity and reason data,
-  deterministic failure-code counts, deterministic pending-module names, and
-  localized Open Settings behavior. No raw paths or source content are
-  surfaced, and no auto-update behavior is implemented.
-- The dashboard/source gates passed. Deterministic package SHA-256 values are:
+- The dashboard date-range correction is recorded at `273997a`; the current
+  product correction adds typed current-failure/quality/retry diagnostics,
+  stable source-module namespaces, immediate success clearing, and an empty
+  privacy-safe refresh event. Current failure views expose no raw payload,
+  path, or error detail, and valid `asset_id` values remain independently
+  constrained to archived `asset:<uuid>` identities.
+- Absent required-provider selection now reports `MissingCapability` with the
+  `Configure source` action in navigation and dashboard commands. After an
+  explicit provider selection, including `activity.days`, a provider with no
+  successful snapshot reports `WaitingForData` with `Import data`. No automatic
+  provider selection or settings rewrite was added; an actually incompatible
+  selected provider remains `IncompatibleContract` and retains its precedence
+  over another missing capability.
+- Focused RED/GREEN coverage proves that repeated Refresh operations retain one
+  current attention item, successful Retry clears current attention without a
+  follow-up scan, retry failure preserves a safe diagnostic, identical failure
+  identities from different sources remain distinct and deterministic, and the
+  existing data-changed boundary refreshes visible shell health.
+- Historical pre-correction mandatory automated Rust checks passed on product
+  commit `bed42a7`:
+
+  ```text
+  bash scripts/run-dashboard-gate.sh                                  # exit 0
+  cargo test -p mfa-integration-tests --test source_modules_gate -- --test-threads=1  # exit 0
+  cargo test --workspace -- --test-threads=1                          # exit 0
+  cargo fmt --all -- --check                                           # exit 0
+  cargo clippy --workspace --all-targets -- -D warnings               # exit 0
+  cargo build --workspace --release                                    # exit 0; 1m27s
+  ```
+
+- Historical post-install web rerun passed Prettier, ESLint, Svelte check, Vitest,
+  Playwright, and the Vite build: Vitest reported 53 passed tests, Playwright
+  reported 5 passed tests, and Svelte check reported 0 errors with the two known
+  `AppShell.svelte` warnings.
+- Playwright `1.62.1` using Chromium revision `1234` from the session cache
+  passed 5/5. An initial sandbox `EPERM` on the local port was resolved by an
+  approved local-only rerun; this is automated browser evidence, not packaged
+  native acceptance.
+- Historical pre-correction packaging attempts and approved reruns were:
+  - Initial `cargo tauri build --bundles app`: exit 0.
+  - Initial full `CI=true cargo tauri build -vv`: exit 1 during sandbox
+    dependency resolution.
+  - Approved `pnpm install --frozen-lockfile` using the local dependency store:
+    exit 0 with runtime pnpm `11.19.0`; lockfile and package manifests
+    unchanged, with no package-manager upgrade.
+  - `cargo tauri build --ci -vv`: exit 1 during sandbox DMG image creation.
+  - Approved `CI=true npm_config_store_dir=SESSION_PNPM_STORE cargo tauri build
+-vv`: exit 0; both app and DMG produced. `SESSION_PNPM_STORE` is a
+    placeholder for the private session dependency store. The DMG used
+    `--skip-jenkins`, so no Finder-prettifying AppleScript ran.
+- Offline artifact verification passed: strict signing and both required
+  entitlements, `codesign --verify --deep --strict`, DMG `hdiutil verify`, exact
+  three-file bundle-resource allowlist and byte equality to `dist/modules`,
+  read-only DMG attachment, embedded-app signing verification, and app/embedded
+  app byte comparison. The DMG was detached successfully, and no app launch or
+  notarization occurred. Signing is ad hoc. The packaging run made no profile
+  changes.
+- Historical pre-correction packaging hashes retained from the `bed42a7` evidence
+  are:
+
+  | Artifact          | SHA-256                                                            |
+  | ----------------- | ------------------------------------------------------------------ |
+  | `.app` executable | `41a90db23fc22755ff13394ddc9940adefe6eb1a9d20764b6ffcebb5cc3f96ed` |
+  | DMG               | `f6e56b75e856a56760b01380fcf1f24919817497b7977e9a45649ed0c44ac97e` |
+
+- Approved copy-based recovery completed on 2026-08-31 without app launch or
+  deletion. The available Application Support copy was restored and its
+  normalized tree hash matches the chosen available source, **not** the
+  original baseline. Preferences were restored hash-identically to the original
+  baseline and passed syntax validation. Live Caches and WebKit were first
+  copied and verified; the live originals were then moved into private
+  quarantine, while the pre-restore copies remain separately retained. Prior
+  live Preferences were preserved the same way before restoration. New empty
+  live directories were created. Originally absent Saved Application State and
+  HTTPStorages remain absent. All original backups, prior recovery variants, the
+  failed-run snapshot, and the original before-manifest were preserved unchanged.
+  Independent recheck verified the restoration, all copies, empty directories,
+  absent roots, and unchanged baseline. The cause of the original mismatch
+  remains unknown. This does not satisfy the historical hash-identical
+  acceptance gate; full original-baseline six-root equivalence remains unproven.
+
+- `python3 scripts/verify_module_packages.py` passed two-build determinism and
+  the exact three-production-package allowlist. The existing module-package
+  SHA-256 table is unchanged:
 
   | Package           | SHA-256                                                            |
   | ----------------- | ------------------------------------------------------------------ |
@@ -535,51 +796,290 @@ packaged-native criterion has not been executed on this HEAD, so its result is
   | Hevy source       | `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379` |
   | Base dashboard    | `13a11f972e93c8bfd51b6e371fb8cef62f45a0887bb4339b1f0b93badf89d901` |
 
-- The full mandatory Rust/web gates passed on this HEAD: workspace Rust tests,
-  `mfa-ingestion` and `myfitanalytics` Clippy with `-D warnings`, rustfmt,
-  frontend Vitest, Svelte check, frontend build, and diff checking. Svelte
-  check reported 0 errors and the two already-known `AppShell` warnings.
-  Playwright passed 5/5 using lockfile package `1.62.1` and an exact browser
-  installed in a session-owned temporary cache.
-- Fresh app and DMG packaging passed. The executable SHA-256 is
-  `0b66ca53e055dc6101815e9b7516689c44f12a51fa7d492fa88735894812a611`; the
-  DMG SHA-256 is
-  `45a859450ebcb890c22bd91ac681955ad7363ccdd1d637f1370d048b9a64fdc4`.
-  The production allowlist contained exactly three module files, and package
-  hashes matched `dist`. The signing verifier, strict `codesign`, entitlements
-  validation, and `hdiutil verify` all passed.
 - The checked-in synthetic-fixture privacy verifier passed for 7 BIFF fixtures
-  and 2 CSV fixtures. Secret/privacy scans reported no new-change findings.
+  and 2 CSV fixtures. The tracked token/private-key pattern scan had no
+  matches (`git grep` exit 1 for the expected no-match result); no new env,
+  key, or database files were added. Product diff checking was clean.
 - Residual `event_failures` belongs only to the test-only fault-injection path.
   Production `PipelineState` uses `NoFaultInjector`, whose `check` always
   returns `Ok`; it is not a source of repeated Refresh count.
-- A prior fresh packaged launch showed a visible 1200x800 window and no crash in
-  process or WebKit logs; that observation is historical and is not current
-  manual acceptance evidence. The approved current procedure requires a fresh
-  run, six-root hash guard, clean quit, and safe screenshot review.
+- Repository provenance for this verification: `origin/main` and mergebase were
+  refreshed to `4e5e2acfa19920678e99af34d03387d389ddd6d8`; PR `#5` remains Draft
+  and OPEN at remote head `314d451c841517717c70a1c8377f4ae8c539519a`. The
+  local product branch was ahead by 10 before this docs-only update. No remote
+  mutation was performed.
 
-### Not implemented
+## Current correction round — persisted Settings hydration and fail-closed profile guard
 
-- The approved manual packaged-native acceptance has not been run on the current
-  HEAD; interactive assertions and synthetic-only screenshots are therefore not
-  claimed.
+This revision records two approved fixes. It does not alter the historical
+recovery records above and does not claim a native run.
+
+### Settings persisted-provider hydration
+
+- `SettingsPage.reload()` now awaits the existing typed `getBootstrapState()`
+  transport call and applies its persisted `activeProviders` map on initial
+  mount and every remount/reload.
+- The real Tauri path is unchanged: `getBootstrapState` reads the persisted
+  application state, and provider selection persists before returning. The
+  mock transport now retains the complete selected mapping to model that real
+  side effect; it does not infer or auto-select providers from module
+  capabilities.
+- Focused RED against the unchanged component:
+  `cd web && pnpm exec vitest run src/lib/pages/SettingsPage.test.ts` exited
+  `1` with `3 failed, 5 passed`.
+- Focused GREEN after the minimal component/mock correction:
+  the same command exited `0` with `8 passed`.
+- The regression covers initial saved mapping, remount after explicit
+  selection, and privacy-safe bootstrap failure handling. No native app launch
+  or profile operation was used.
+
+### Checked-in fail-closed profile guard
+
+`scripts/profile_guard.py` and its executable synthetic suite replace the old
+operational guard procedure. The helper never launches an app and never
+deletes a tree. Its phases are capture of independent masters, pre-launch
+isolation of originals into a retained original-holding tree while leaving all
+six live roots absent, and post-quit variant isolation plus copy-restore into a
+separate retained variant-holding tree. The manifest/hash contract includes
+canonical relative names, empty directories, mode/size/mtime metadata, and
+regular-file bytes; `preferences` is explicitly a file root. The native adapter
+uses the fixed bundle-ID roots and real OS-home lookup; the fake-home native
+builder/lifecycle test injects both home and process context and does not access
+the host profile. The process identity is the actual lowercase executable
+`myfitanalytics`.
+
+Clarified RED against the prior seeded two-phase helper:
+`python3 scripts/test_profile_guard.py` exited `1` with `7` assertion failures.
+Clarified GREEN after the three-phase/native correction:
+the same command exited `0` with `20` synthetic tests passed. The tests cover
+rename independence, byte corruption, all-master verification before mutation,
+partial move/copy and interruption/retry, absent roots, malformed manifests,
+destination conflicts, symlinks, unsupported objects, exact process absence,
+and injected fake-home/process contexts, including exact root-parent durability
+and subprocess failure/empty/malformed process output. No real profile or private recovery
+tree was read or modified.
+An independent manager synthetic probe also passed its two checks after the
+lowercase executable correction: exact process identity and the fake-home
+capture/isolate/variant/restore round trip. This is not native acceptance.
+
+### Current absent-provider correction evidence
+
+The current correction was developed with strict command-level TDD. The
+pre-correction missing-provider command regression was observed RED:
+
+```text
+cargo test -p myfitanalytics --test dashboard_commands missing_provider_selection_is_reported_in_navigation_and_dashboard -- --exact --nocapture
+exit 101
+```
+
+The failure was the expected absent-provider classification: the command path
+returned `IncompatibleContract` instead of `MissingCapability`.
+
+Fresh focused GREEN checks after the one-line adapter correction are:
+
+```text
+cargo test -p myfitanalytics --test dashboard_commands -- --nocapture
+exit 0 — 9 passed, 0 failed
+
+cargo test -p myfitanalytics --lib commands::tests::incompatible_selected_provider_remains_incompatible_ahead_of_missing_capability -- --exact --nocapture
+exit 0 — 1 passed, 0 failed
+
+cargo test -p myfitanalytics --test provider_selection_commands -- --nocapture
+exit 0 — 1 passed, 0 failed
+
+cargo fmt --all -- --check
+exit 0
+
+git diff --check
+exit 0
+```
+
+The command regressions use temporary roots and bundled synthetic packages. The
+manager-provided focused Clippy log also exited `0`. The manager-provided
+historical-update probe exited `0`: it showed `MissingCapability` before and
+after both explicit module updates, then `WaitingForData` only after explicit
+new-capability selection; provider state was unchanged by updates and changed
+only after explicit selection. This records the human-approved current criterion for
+the historical packages: initially advertised `base` and `MyNetDiary` pending
+updates clear after both explicit updates, while unselected `activity.days`
+remains `MissingCapability` with `Configure source` before and after. The
+genuine `IncompatibleContract` behavior remains a mandatory automatic-test
+boundary; this scenario does not prove native clearing of a real
+incompatibility.
+
+### Fresh final verification — frozen source revision `892e1c8`
+
+The manager independently verified the frozen source revision
+`892e1c8ea6ce1ce751a56df4558d11656f5e1f2c` with these evidence scripts:
+
+```text
+bash /private/tmp/mfa-plan4-provider-state.oKTcqN/full-gates.sh     # runner exit 0; 33/33 rows exit 0
+bash /private/tmp/mfa-plan4-provider-state.oKTcqN/package-gates.sh  # runner exit 0; 9/9 rows exit 0
+bash /private/tmp/mfa-plan4-provider-state.oKTcqN/audit-dmg.sh      # exit 0
+bash /private/tmp/mfa-plan4-provider-state.oKTcqN/hygiene.sh        # exit 0
+```
+
+- The full-gate runner used `CARGO_NET_OFFLINE=true` and
+  `CARGO_BUILD_JOBS=2`. All 33 `gates.tsv` rows exited `0`, and the runner
+  exited `0`: Rust reported 269 passed, 0 ignored, and 90 result groups; Vitest
+  reported 56 passed tests in 13 files; Playwright reported 5 passed tests with
+  locked Playwright `1.62.1` and Chromium revision `1234` from the existing
+  cache; profile guard checks reported 20 passed synthetic tests plus 2
+  independent checks; Svelte reported 0 errors and 2 pre-existing `AppShell`
+  warnings. Full formatting, Clippy, release, source, dashboard, provider,
+  lifecycle, ingestion, web, determinism, privacy, and unchanged-source gates
+  all passed.
+- The package-gate runner used `CI=true`, `CARGO_NET_OFFLINE=true`, and
+  `CARGO_BUILD_JOBS=2`; it built the app with `cargo tauri build --bundles app`
+  and the full DMG with `cargo tauri build`. All 9 `package-gates.tsv` rows
+  exited `0`, and the runner exited `0`: both required entitlements, strict
+  codesign, `hdiutil verify`, exact byte equality for the 3 packaged module
+  resources against `dist`, and unchanged source HEAD passed. Signing was ad
+  hoc and not notarized.
+- `audit-dmg.sh` exited `0`: the DMG was attached read-only without Finder, the
+  embedded app passed strict signature verification, the complete app tree was
+  byte-identical to the current bundle, and the image detached successfully.
+- `hygiene.sh` exited `0`: secret/key/token and sensitive-filename scans had no
+  matches; exactly 7 checked-in XLS fixtures and 2 CSV fixtures were checked
+  and privacy-verified as synthetic fixtures; marker hits were limited to the
+  old scan description and a lock-integrity substring.
+- Fresh artifact hashes from `final-artifacts.sha256` are:
+
+  | Artifact          | SHA-256                                                            |
+  | ----------------- | ------------------------------------------------------------------ |
+  | `.app` executable | `d0d14b89871c739aa7d001d9981db6cd25744ba420929f3b2c7fac9141eb9f0e` |
+  | DMG               | `27b7d4182680f7e3a8142cb27e03a3b3bf9e94b7e66b6210277fef086af3b313` |
+  | Base dashboard    | `13a11f972e93c8bfd51b6e371fb8cef62f45a0887bb4339b1f0b93badf89d901` |
+  | Hevy source       | `b2f7963f09c392e96874a231cd54abdb694870929b3552c878f53a3fe8588379` |
+  | MyNetDiary source | `79a8c96594a95e508fc5cae95057323528d3f180af9e8f3c25bf472b635fc56c` |
+
+- Read-only `gh pr view 5 --repo Simarglok/MyFitAnalytics --json number,state,isDraft,headRefOid,headRefName,baseRefName,url` recorded PR `#5`
+  as OPEN and Draft at remote head `314d451c841517717c70a1c8377f4ae8c539519a`.
+  A separate read-only `git ls-remote` check recorded unchanged `origin/main`
+  at `4e5e2acfa19920678e99af34d03387d389ddd6d8`. No remote write was performed.
+- During the recorded automated/package verification, no app was launched, no
+  native GUI or profile operation occurred, and no publication or notarization
+  occurred. These fresh automated/package results do not substitute for native
+  acceptance.
+
+### Current acceptance boundary
+
+The manager-recorded P6 native UI/packaged-native run on the pre-fix package is
+**FAIL** for stale shell state after Settings mutations and for rejected Retry
+hiding the quality row. Its normal Quit, storage, and six-root restoration
+observations are separate successful results. The fixed-source native retest
+remains **NOT RUN/PENDING**, not PASS; the historical app/DMG and module hashes
+recorded above are package/audit evidence only and must not be treated as a
+fixed-source native result. The separate current app/DMG package-gate, DMG
+audit, and correction-round hygiene remain **PENDING**. The mandatory
+prior-production-package → current-package normal-install scenario must first
+show pending updates named `base` and `MyNetDiary`; after explicit `Update` on
+both modules those notices must disappear. For unselected `activity.days`, the
+expected `MissingCapability`/`Configure source` state, visible as `Required data
+is not available yet` with `Configure source`, must remain the same before and
+after both updates. No automatic package update or provider selection is
+allowed. Only explicit `Use` for `activity.days` may change selection and yield
+`WaitingForData` with `Import data` before data arrives. This criterion remains
+**PENDING**, never `N/A`; see the manager-only preflight and Russian manual
+guide. It does not prove clearing a genuine `IncompatibleContract`; the
+mandatory automatic incompatible-provider tests remain separate. The historical
+native run remains **FAIL** and is never retroactively changed.
+
+### Not implemented / pending
+
+- The fixed-source native retest remains **NOT RUN/PENDING**; the fresh staging root
+  `/private/tmp/mfa-plan4-ui-retest.aWTdix` was not run. The manager-recorded
+  pre-fix native run is **FAIL** for stale shell state and rejected Retry hiding
+  the single quality row. Its successful fixture import, `4/31` coverage,
+  stable `Attention` equal to 1, one visible failure row, normal Quit/process
+  absence, retained synthetic aggregate checks, and exact six-root restoration
+  do not turn the failed run into a PASS. The remaining analytics-page
+  walkthrough and Phase events CRUD were not completed. Historical package-gate
+  and DMG audit evidence above does not substitute for the fixed-source
+  manual/native retest; the separate current package-gate, DMG audit, and
+  correction-round hygiene remain **PENDING**. Historical pre-correction
+  packaging had ad-hoc signing and no notarization.
+- A final read-only Terra High review remains **PENDING** and requires new
+  informed authorization; it is not assumed approved for `892e1c8`.
+- Full/package/DMG/hygiene runs for source revision `892e1c` passed as recorded
+  above. For the current bounded UI correction, all 33 intended automatic
+  source/web rows passed across the initial and continuation ledgers; the
+  original `disk-before-rustfmt` exit 70 remains a separate interrupted attempt,
+  and `head-unchanged`/`diff-unchanged` passed. The separate current
+  package-gate, DMG audit, and correction-round hygiene remain **PENDING**. The
+  remaining fixed-source native work is the historical-package
+  scenario: pending updates must initially name `base` and `MyNetDiary`, both
+  explicit module Updates must clear those notices, and unselected
+  `activity.days` must remain `MissingCapability`/`Configure source` before and
+  after. Only explicit `Use` may yield `WaitingForData`/`Import data`. This
+  does not replace the mandatory automatic incompatible-provider tests or prove
+  clearing a genuine `IncompatibleContract`.
 - XCUITest is deferred to the separate planning-only follow-up task.
 
 ### Remaining work
 
-1. Execute `docs/testing/plan4-packaged-native-manual.md` against a fresh
-   packaged artifact and record every pass/fail row, or record a truthful
-   `BLOCKED`/`FAIL` result.
-2. If native automation is desired later, obtain approval for and execute the
+1. Prepare a safe fresh native acceptance run without reusing the disabled old
+   runner, using the checked-in capture/isolate/restore helper and a fresh
+   existing OS user’s exact six roots. Retain all original and variant copies;
+   do not seed the fresh live roots with recovered profile data.
+2. Execute `docs/testing/plan4-packaged-native-manual.md` against the freshly
+   verified current app/DMG artifacts and record every pass/fail row, or record a
+   truthful `BLOCKED`/`FAIL` result.
+   The acceptance checklist must retain the full goal:
+   visible import without restart; bounded failed Refresh with actionable
+   Sources & quality and Retry; pending updates/Open Settings initially naming
+   base and MyNetDiary; explicit Update for both modules clearing those notices
+   while unselected `activity.days` remains
+   `MissingCapability`/`Configure source` before and after; explicit `Use` for
+   `activity.days` yielding `WaitingForData`/`Import data`; every analytics page,
+   gaps, providers, phase CRUD, and Plan 3 Settings; clean quit/process
+   absence; aggregate DB integrity; and hash-identical six-root restore.
+3. Use the proven normal `PackageInstaller`/`CapabilityRegistry` preparation,
+   then run pending-update/Open Settings, verify that the initial pending names
+   are `base` and `MyNetDiary`, and perform explicit `Update` for both modules.
+   Verify that both pending notices disappear while unselected `activity.days`
+   remains `MissingCapability` with `Configure source` before and after the
+   updates. Explicitly use `activity.days` and verify the transition to
+   `WaitingForData` with `Import data`; this remains **PENDING**, never `N/A`.
+   The genuine `IncompatibleContract` behavior remains covered by mandatory
+   automatic-provider tests and is not claimed cleared by this scenario.
+4. Keep the historical hash-identical six-root acceptance gate separate from
+   the approved copy-based recovery; full original-baseline six-root equivalence
+   remains unproven and must not be inferred from the available-source match.
+5. If native automation is desired later, obtain approval for and execute the
    separate XCUITest feasibility/task contract; it is not required for the
    current Plan 4 criterion.
-3. Obtain review of the completed manual record before reclassifying it as
-   passed.
+6. Obtain the final read-only Terra High review of the completed manual record
+   before reclassifying the product as Ready.
 
 ### Blockers
 
-No product or automated-gate blocker is recorded. The manual result is simply
-not yet executed; any permission prompt or non-synthetic input during the
-runbook is a stop condition requiring separate approval, not an invitation to
-change permissions or add a foreground-control daemon. Plan 5 remains out of
-scope, and remote push, PR update, and merge are not authorized.
+The mandatory native UI checklist and final read-only review prevent a Ready
+classification. The prior manual run at `273997a` is not reusable evidence for
+`bed42a7`: it passed workspace/import visibility and a stable one-attention
+observation but failed Sources & quality because the page was empty despite the
+attention item. That native run remains **FAIL** and is never retroactively
+**PASS**; the old runner remains disabled. Approved copy-based recovery is
+complete within scope, with the available Application Support copy matching its
+chosen available source after normalization but **not** the original baseline,
+Preferences matching the original baseline hash with valid syntax, live Caches
+and WebKit first copied and verified before the live originals were moved into
+private quarantine, with the pre-restore copies separately retained, prior live
+Preferences preserved the same way before restoration, new empty live
+directories created, and originally absent roots still absent. All
+backups and recovery variants were preserved unchanged; no deletion or app
+launch occurred, and the cause of the original mismatch remains unknown. The
+independent recheck verified restoration, copies, empty directories, absent
+roots, and unchanged baseline. Full original-baseline six-root equivalence
+remains unproven; the historical hash-identical acceptance gate is unsatisfied.
+No new native acceptance has occurred, and the final Terra High review remains
+pending.
+
+The current automatic source/web results are recorded above and do not substitute
+for native acceptance; the separate current package/DMG/hygiene checks remain
+pending. Any permission prompt or
+non-synthetic input during the runbook is a stop condition requiring separate
+approval, not an invitation to change permissions or add a foreground-control
+daemon. Residual `event_failures` remains test-injector-only. Plan 5 remains out
+of scope, XCUITest is deferred, and remote push, PR update, and merge are not
+authorized.

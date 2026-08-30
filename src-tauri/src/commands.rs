@@ -1215,7 +1215,7 @@ fn dashboard_availability(
     let mut coverage = CoverageCatalog::default();
     for requirement in requirements {
         let provider = active_providers.get(&requirement.capability).cloned();
-        let contract_compatible = provider.as_ref().is_some_and(|provider| {
+        let contract_compatible = provider.as_ref().is_none_or(|provider| {
             state.modules().into_iter().any(|module| {
                 module.module_id == *provider
                     && matches!(
@@ -1491,9 +1491,37 @@ fn catalog_install_state_for_inspect_error(code: &str) -> &'static str {
 mod tests {
     use super::{
         active_provider_matches, catalog_install_state, catalog_install_state_for_inspect_error,
-        declared_capabilities,
+        dashboard_availability, declared_capabilities,
     };
+    use mfa_analytics::DateRange;
+    use mfa_config::{AppSettings, SettingsStore};
     use mfa_contracts::{CapabilityId, DashboardRequirement, ModuleId};
+    use mfa_module_host::PackageInstaller;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn state_with_real_incompatible_provider() -> (crate::AppState, TempDir) {
+        let root = TempDir::new().unwrap();
+        let config_root = root.path().join("config");
+        let module_root = root.path().join("modules");
+        fs::create_dir_all(&config_root).unwrap();
+        let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist/modules");
+        let installer = PackageInstaller::new(&module_root);
+        for name in ["base.mfadashboard", "mynetdiary.mfasource"] {
+            installer.install(&package_root.join(name)).unwrap();
+        }
+        SettingsStore::new(config_root.join("settings.json"))
+            .save(&AppSettings::default())
+            .unwrap();
+        let state = crate::AppState::from_roots_with_core_catalog(
+            &config_root,
+            &module_root,
+            br#"{"locale":"en","namespace":"core","messages":{"app.title":"MyFitAnalytics"}}"#,
+        )
+        .unwrap();
+        (state, root)
+    }
 
     #[test]
     fn incompatible_package_errors_have_an_explicit_catalog_state() {
@@ -1543,6 +1571,48 @@ mod tests {
         active.insert(capability.clone(), right.clone());
         assert!(!active_provider_matches(&active, &capability, &left));
         assert!(active_provider_matches(&active, &capability, &right));
+    }
+
+    #[test]
+    fn incompatible_selected_provider_remains_incompatible_ahead_of_missing_capability() {
+        let (state, _root) = state_with_real_incompatible_provider();
+        let incompatible_capability = CapabilityId::try_from("body.weight").unwrap();
+        let absent_capability = CapabilityId::try_from("activity.days").unwrap();
+        let requirements = vec![
+            DashboardRequirement {
+                capability: incompatible_capability.clone(),
+                extension: None,
+            },
+            DashboardRequirement {
+                capability: absent_capability,
+                extension: None,
+            },
+        ];
+        let active_providers = std::collections::BTreeMap::from([(
+            incompatible_capability,
+            ModuleId::try_from("mynetdiary").unwrap(),
+        )]);
+        let availability = dashboard_availability(
+            &state,
+            "base",
+            &requirements,
+            &active_providers,
+            &[],
+            0,
+            &DateRange {
+                start: "2026-01-01".parse().unwrap(),
+                end: "2026-01-31".parse().unwrap(),
+            },
+        );
+        assert_eq!(
+            availability.state,
+            mfa_contracts::AvailabilityState::IncompatibleContract
+        );
+        assert_eq!(availability.reason_key, "dashboard.incompatible_contract");
+        assert_eq!(
+            availability.action.as_deref(),
+            Some("dashboard.action.update_module")
+        );
     }
 }
 
