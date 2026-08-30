@@ -26,7 +26,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use uuid::Uuid;
 
 const PERIODIC_SCAN_INTERVAL: Duration = Duration::from_secs(1);
@@ -190,6 +190,7 @@ struct PipelineState {
     fail_next_asset: bool,
     fault_injector: Arc<dyn FaultInjector>,
     recovery_gate: RecoveryGate,
+    operation_lock: Arc<AsyncMutex<()>>,
     current_failures: BTreeMap<String, FailureSummary>,
     event_failures: u64,
 }
@@ -198,6 +199,14 @@ struct PipelineState {
 struct FailureSummary {
     code: String,
     critical: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentFailureView {
+    pub identity: String,
+    pub code: String,
+    pub critical: bool,
+    pub asset_id: Option<Uuid>,
 }
 
 #[derive(Clone)]
@@ -231,6 +240,7 @@ impl IngestionCoordinator {
             fail_next_asset: false,
             fault_injector: Arc::new(NoFaultInjector),
             recovery_gate: RecoveryGate::ready(),
+            operation_lock: Arc::new(AsyncMutex::new(())),
             current_failures: BTreeMap::new(),
             event_failures: 0,
         }));
@@ -325,13 +335,35 @@ impl IngestionCoordinator {
         )
     }
 
+    pub fn current_failures(&self) -> Vec<CurrentFailureView> {
+        let guard = self.state.lock().unwrap();
+        guard
+            .current_failures
+            .iter()
+            .map(|(identity, failure)| CurrentFailureView {
+                identity: identity.clone(),
+                code: failure.code.clone(),
+                critical: failure.critical,
+                asset_id: identity
+                    .strip_prefix("asset:")
+                    .and_then(|asset_id| Uuid::parse_str(asset_id).ok()),
+            })
+            .collect()
+    }
+
     pub async fn retry_asset(&self, asset_id: Uuid) -> Result<RetryResult, IngestionError> {
         let state = Arc::clone(&self.state);
-        let (dependencies, gate) = {
+        let (dependencies, gate, operation_lock) = {
             let guard = state.lock().map_err(|_| poisoned())?;
-            (guard.dependencies.clone(), guard.recovery_gate.clone())
+            (
+                guard.dependencies.clone(),
+                guard.recovery_gate.clone(),
+                Arc::clone(&guard.operation_lock),
+            )
         };
         gate.ensure_ingestion_allowed()?;
+        let _operation_guard = operation_lock.lock().await;
+        let failure_identity = format!("asset:{asset_id}");
         let inventory = ArchiveReconciler::new(
             dependencies.workspace.clone(),
             dependencies.source_module.module_id.clone(),
@@ -366,10 +398,30 @@ impl IngestionCoordinator {
         {
             guard.last_attempt_id = Some(last_attempt_id);
         }
-        let attempt_id = import_result?.ok_or_else(|| IngestionError::AssetFailure {
-            code: "retry_not_started".to_owned(),
-            detail: asset_id.to_string(),
-        })?;
+        let attempt_id = match import_result {
+            Ok(Some(attempt_id)) => {
+                if let Ok(mut guard) = state.lock() {
+                    guard.current_failures.remove(&failure_identity);
+                    let _ = guard.events.send(CoreEvent::DataChanged {
+                        capabilities: Vec::new(),
+                        dashboards: Vec::new(),
+                    });
+                }
+                attempt_id
+            }
+            Ok(None) => {
+                let error = IngestionError::AssetFailure {
+                    code: "retry_not_started".to_owned(),
+                    detail: asset_id.to_string(),
+                };
+                record_current_failure(&state, failure_identity, &error);
+                return Err(error);
+            }
+            Err(error) => {
+                record_current_failure(&state, failure_identity, &error);
+                return Err(error);
+            }
+        };
         Ok(RetryResult {
             asset_id,
             attempt_id,
@@ -388,6 +440,11 @@ async fn run_scan(
     state: Arc<Mutex<PipelineState>>,
     _request: ScanRequest,
 ) -> Result<ScanReport, IngestionError> {
+    let operation_lock = {
+        let guard = state.lock().map_err(|_| poisoned())?;
+        Arc::clone(&guard.operation_lock)
+    };
+    let _operation_guard = operation_lock.lock().await;
     let mut report = ScanReport::default();
     let mut current_failures = BTreeMap::new();
     let archived_assets = match reconcile_archive_assets(&state).await {
@@ -486,6 +543,16 @@ fn record_failure(
         _ => (error.code().to_owned(), false),
     };
     failures.insert(identity, FailureSummary { code, critical });
+}
+
+fn record_current_failure(
+    state: &Arc<Mutex<PipelineState>>,
+    identity: String,
+    error: &IngestionError,
+) {
+    if let Ok(mut guard) = state.lock() {
+        record_failure(&mut guard.current_failures, identity, error);
+    }
 }
 
 async fn reconcile_archive_assets(

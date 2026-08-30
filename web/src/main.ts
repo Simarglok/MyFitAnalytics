@@ -27,6 +27,7 @@ const transport = window.__MFA_MOCK__
       qualityItems: [
         {
           id: "mock-quality-1",
+          code: null,
           itemType: "import",
           severity: "warning",
           message: "One deterministic quality issue",

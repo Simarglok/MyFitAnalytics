@@ -201,6 +201,7 @@ export interface IngestionStatus {
 
 export interface QualityItem {
   id: string;
+  code: string | null;
   itemType: string;
   severity: string;
   message: string;

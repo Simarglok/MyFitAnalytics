@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import AppShell from "./AppShell.svelte";
 import { MockTransport } from "../mock-transport";
 import type {
+  AttemptView,
   DashboardPageView,
   DataChangedEvent,
   DateRangeView,
+  IngestionStatus,
   NavigationItemView,
   NavigationView,
   ScanTicket,
@@ -36,6 +38,27 @@ const overviewItem: NavigationItemView = {
 
 function navigation(initialRange: DateRangeView): NavigationView {
   return { items: [overviewItem], initialRange };
+}
+
+function ingestionStatus(
+  state: "attention" | "healthy",
+  attentionItems: number,
+): IngestionStatus {
+  return {
+    health: {
+      state,
+      workingJobs: 0,
+      waitingAssets: 0,
+      attentionItems,
+      criticalItems: 0,
+      failureCodeCounts:
+        attentionItems > 0 ? { source_validation_failed: attentionItems } : {},
+    },
+    queueCapacity: 32,
+    recoveryMode: "normal",
+    configured: true,
+    pendingModuleUpdates: [],
+  };
 }
 
 class SequencedNavigationTransport extends MockTransport {
@@ -101,6 +124,42 @@ class SequencedNavigationTransport extends MockTransport {
   }
 }
 
+class RetryHealthTransport extends MockTransport {
+  private status = ingestionStatus("attention", 1);
+  private dataChangedListener: ((event: DataChangedEvent) => void) | undefined;
+
+  get hasDataChangedListener(): boolean {
+    return this.dataChangedListener !== undefined;
+  }
+
+  override async getIngestionStatus(): Promise<IngestionStatus> {
+    return this.status;
+  }
+
+  override async retryAsset(assetId: string): Promise<AttemptView> {
+    this.calls.push(`retryAsset:${assetId}`);
+    this.status = ingestionStatus("healthy", 0);
+    this.dataChangedListener?.({ capabilities: [], dashboards: [] });
+    return {
+      assetId,
+      attemptId: "attempt-1",
+      status: "retry_queued",
+      errorCode: null,
+    };
+  }
+
+  override async subscribeDataChanged(
+    listener: (event: DataChangedEvent) => void,
+  ): Promise<() => void> {
+    this.dataChangedListener = listener;
+    return () => {
+      if (this.dataChangedListener === listener) {
+        this.dataChangedListener = undefined;
+      }
+    };
+  }
+}
+
 async function expectVisibleRange(
   target: HTMLElement,
   range: DateRangeView,
@@ -117,6 +176,32 @@ async function expectVisibleRange(
 }
 
 describe("AppShell dashboard range synchronization", () => {
+  it("refreshes visible health after a successful retry notification", async () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const transport = new RetryHealthTransport();
+    const app = mount(AppShell, { target, props: { transport } });
+
+    await vi.waitFor(() =>
+      expect(target.querySelector(".status-banner")?.textContent).toContain(
+        "1 attention items",
+      ),
+    );
+    await vi.waitFor(() => expect(transport.hasDataChangedListener).toBe(true));
+
+    await transport.retryAsset("asset-1");
+
+    await vi.waitFor(() => {
+      expect(target.querySelector(".status-banner")?.textContent).toContain(
+        "0 attention items",
+      );
+      expect(target.querySelector(".status-banner")?.className).toContain(
+        "status-healthy",
+      );
+    });
+    unmount(app);
+  });
+
   it("rebases the dashboard range after Refresh when the backend initial range changes", async () => {
     const target = document.createElement("div");
     document.body.append(target);

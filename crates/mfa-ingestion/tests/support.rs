@@ -78,6 +78,11 @@ impl FakeRuntime {
     pub fn fail_always(&self) {
         *self.fail_always.lock().unwrap() = true;
     }
+
+    #[allow(dead_code)]
+    pub fn clear_fail_always(&self) {
+        *self.fail_always.lock().unwrap() = false;
+    }
 }
 
 pub fn nutrition_batch() -> SourceBatch {

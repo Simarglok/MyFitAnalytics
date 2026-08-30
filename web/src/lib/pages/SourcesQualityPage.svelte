@@ -63,7 +63,7 @@
         <tbody>
           {#each items as item (item.id)}
             <tr>
-              <td>{item.severity}</td><td>{item.message}</td><td>{item.status}</td>
+              <td>{item.severity}</td><td>{#if item.code}<code data-quality-code={item.code}>{item.code}</code>{:else}{item.message}{/if}</td><td>{item.status}</td>
               <td>{#if item.assetId}<button type="button" on:click={() => void retry(item)} disabled={retrying.has(item.id)}>{retrying.has(item.id) ? message('quality.retrying') : message('quality.retry')}</button>{/if}</td>
             </tr>
           {/each}

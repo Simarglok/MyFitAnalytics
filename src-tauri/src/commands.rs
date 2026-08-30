@@ -112,6 +112,7 @@ pub struct IngestionStatusView {
 #[serde(rename_all = "camelCase")]
 pub struct QualityItemView {
     pub id: String,
+    pub code: Option<String>,
     pub item_type: String,
     pub severity: String,
     pub message: String,
@@ -1641,32 +1642,61 @@ pub async fn get_ingestion_status_inner(
 pub async fn list_quality_items_inner(
     state: &AppState,
 ) -> Result<Vec<QualityItemView>, CommandError> {
-    let database = {
+    let (database, coordinators) = {
         let storage = state.storage_lock().map_err(CommandError::from)?;
-        storage.as_ref().map(|storage| storage.database.clone())
+        match storage.as_ref() {
+            Some(storage) => (
+                Some(storage.database.clone()),
+                storage
+                    .coordinators
+                    .iter()
+                    .map(|(module_id, coordinator)| (module_id.clone(), coordinator.clone()))
+                    .collect::<Vec<_>>(),
+            ),
+            None => (None, Vec::new()),
+        }
     };
-    let Some(database) = database else {
-        return Ok(Vec::new());
-    };
-    let response = database
-        .execute(ListQualityItems)
-        .await
-        .map_err(|error| CommandError {
-            code: "database_unavailable".to_owned(),
-            message: error.to_string(),
-        })?;
-    Ok(response
-        .items
-        .into_iter()
-        .map(|item| QualityItemView {
-            id: item.data_quality_item_id,
-            item_type: item.item_type,
-            severity: item.severity,
-            message: item.message,
-            status: item.status,
-            asset_id: item.source_asset_id.map(|asset_id| asset_id.to_string()),
-        })
-        .collect())
+    let mut items = BTreeMap::new();
+    if let Some(database) = database {
+        let response = database
+            .execute(ListQualityItems)
+            .await
+            .map_err(|error| CommandError {
+                code: "database_unavailable".to_owned(),
+                message: error.to_string(),
+            })?;
+        for item in response.items {
+            let view = QualityItemView {
+                id: item.data_quality_item_id,
+                code: None,
+                item_type: item.item_type,
+                severity: item.severity,
+                message: item.message,
+                status: item.status,
+                asset_id: item.source_asset_id.map(|asset_id| asset_id.to_string()),
+            };
+            items.entry(view.id.clone()).or_insert(view);
+        }
+    }
+    for (module_id, coordinator) in coordinators {
+        for failure in coordinator.current_failures() {
+            let view = QualityItemView {
+                id: format!("{module_id}:{}", failure.identity),
+                code: Some(failure.code.clone()),
+                item_type: "import".to_owned(),
+                severity: if failure.critical {
+                    "critical".to_owned()
+                } else {
+                    "error".to_owned()
+                },
+                message: failure.code,
+                status: "failed".to_owned(),
+                asset_id: failure.asset_id.map(|asset_id| asset_id.to_string()),
+            };
+            items.entry(view.id.clone()).or_insert(view);
+        }
+    }
+    Ok(items.into_values().collect())
 }
 
 pub async fn retry_asset_inner(

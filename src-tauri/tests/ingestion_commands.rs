@@ -1,4 +1,5 @@
-use mfa_config::{AppSettings, SettingsStore};
+use mfa_archive::ArchiveReconciler;
+use mfa_config::{AppSettings, SettingsStore, WorkspacePaths};
 use mfa_contracts::ModuleId;
 use myfitanalytics::dialogs::DialogPort;
 use serde_json::json;
@@ -27,6 +28,28 @@ impl DialogPort for WorkspacePicker {
 
     fn pick_module_package(&self) -> Option<PathBuf> {
         None
+    }
+
+    fn pick_source_inbox(&self, _module_id: &ModuleId) -> Option<PathBuf> {
+        None
+    }
+}
+
+struct PackagePicker(Mutex<Option<PathBuf>>);
+
+impl PackagePicker {
+    fn new(path: PathBuf) -> Self {
+        Self(Mutex::new(Some(path)))
+    }
+}
+
+impl DialogPort for PackagePicker {
+    fn pick_workspace_root(&self) -> Option<PathBuf> {
+        None
+    }
+
+    fn pick_module_package(&self) -> Option<PathBuf> {
+        self.0.lock().unwrap().take()
     }
 
     fn pick_source_inbox(&self, _module_id: &ModuleId) -> Option<PathBuf> {
@@ -271,6 +294,168 @@ async fn refresh_status_and_quality_commands_return_safe_typed_dtos() {
     assert!(items.is_empty());
     let serialized = serde_json::to_value(&status).unwrap();
     assert_eq!(serialized["health"]["state"], json!("healthy"));
+    state.shutdown_storage().await.unwrap();
+}
+
+#[tokio::test]
+async fn quality_command_merges_current_failure_once_with_persisted_quality_items() {
+    let (state, root, _config_root) = state();
+    let package =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist/modules/mynetdiary.mfasource");
+    myfitanalytics::commands::choose_and_install_module_inner(&state, &PackagePicker::new(package))
+        .await
+        .unwrap()
+        .unwrap();
+    let workspace_root = root.path().join("workspace");
+    let workspace = choose_workspace_root(&state, workspace_root.clone()).await;
+    let source = workspace
+        .source_paths
+        .iter()
+        .find(|source| source.module_id == "mynetdiary")
+        .unwrap();
+    let inbox = std::path::Path::new(&source.inbox_path);
+    fs::write(
+        inbox.join("quality.xls"),
+        include_bytes!("../../modules/sources/mynetdiary/tests/fixtures/unknown-activity.xls"),
+    )
+    .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+
+    fs::write(
+        inbox.join("invalid.xls"),
+        include_bytes!(
+            "../../modules/sources/mynetdiary/tests/fixtures/missing-required-sheet.xls"
+        ),
+    )
+    .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+
+    let status = myfitanalytics::commands::get_ingestion_status_inner(&state)
+        .await
+        .unwrap();
+    assert_eq!(status.health.attention_items, 1);
+    assert_eq!(
+        status
+            .health
+            .failure_code_counts
+            .get("source_validation_failed"),
+        Some(&1)
+    );
+
+    let items = myfitanalytics::commands::list_quality_items_inner(&state)
+        .await
+        .unwrap();
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| item.item_type == "mynetdiary.unknown_activity")
+            .count(),
+        1
+    );
+    let invalid_asset_id = ArchiveReconciler::new(
+        WorkspacePaths::new(workspace_root),
+        ModuleId::try_from("mynetdiary").unwrap(),
+    )
+    .scan()
+    .unwrap()
+    .assets
+    .into_iter()
+    .find(|asset| asset.original_filename == "invalid.xls")
+    .unwrap()
+    .asset_id;
+    let current = items
+        .iter()
+        .find(|item| item.code.as_deref() == Some("source_validation_failed"))
+        .unwrap();
+    assert_eq!(current.id, format!("mynetdiary:asset:{invalid_asset_id}"));
+    assert_eq!(current.item_type, "import");
+    assert_eq!(current.severity, "error");
+    assert_eq!(current.message, "source_validation_failed");
+    assert_eq!(current.status, "failed");
+    assert_eq!(current.asset_id, Some(invalid_asset_id.to_string()));
+    assert_eq!(items.iter().filter(|item| item.id == current.id).count(), 1);
+
+    let serialized = serde_json::to_string(current).unwrap();
+    for forbidden_key in [
+        "detail",
+        "path",
+        "inboxPath",
+        "archivePath",
+        "bytes",
+        "sql",
+        "credential",
+    ] {
+        assert!(
+            !serialized.contains(forbidden_key),
+            "leaked {forbidden_key}"
+        );
+    }
+    assert!(!serialized.contains("missing-required-sheet.xls"));
+    assert!(!serialized.contains("required sheet"));
+    assert!(!serialized.contains(root.path().to_string_lossy().as_ref()));
+    state.shutdown_storage().await.unwrap();
+}
+
+#[tokio::test]
+async fn quality_command_namespaces_same_current_failure_identity_per_source() {
+    let (state, root) = two_source_state();
+    let workspace_root = root.path().join("workspace");
+    let workspace = choose_workspace_root(&state, workspace_root.clone()).await;
+    for source in &workspace.source_paths {
+        fs::remove_dir_all(&source.archive_path).unwrap();
+        fs::write(&source.archive_path, b"archive failure").unwrap();
+    }
+
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    myfitanalytics::commands::refresh_now_inner(&state)
+        .await
+        .unwrap();
+    let first = myfitanalytics::commands::list_quality_items_inner(&state)
+        .await
+        .unwrap();
+    let second = myfitanalytics::commands::list_quality_items_inner(&state)
+        .await
+        .unwrap();
+
+    assert_eq!(first.len(), 2);
+    let mut ids = first
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec![
+            "first-source:archive_reconciliation",
+            "second-source:archive_reconciliation"
+        ]
+    );
+    for item in &first {
+        assert_eq!(item.item_type, "import");
+        assert_eq!(item.severity, "critical");
+        assert_eq!(item.status, "failed");
+        assert_eq!(item.asset_id, None);
+        assert_eq!(item.message, item.code.as_deref().unwrap());
+    }
+    assert_eq!(
+        serde_json::to_value(&first).unwrap(),
+        serde_json::to_value(&second).unwrap()
+    );
+    let serialized = serde_json::to_string(&first).unwrap();
+    assert!(!serialized.contains("archive failure"));
+    assert!(!serialized.contains(root.path().to_string_lossy().as_ref()));
     state.shutdown_storage().await.unwrap();
 }
 

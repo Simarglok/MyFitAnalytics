@@ -292,13 +292,86 @@ async fn repeated_failed_scans_keep_one_current_attention_and_report_code_counts
     coordinator.request_scan(request()).await.unwrap();
     coordinator.request_scan(request()).await.unwrap();
     let second = coordinator.health_snapshot();
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let third = coordinator.health_snapshot();
+    let first_failures = coordinator.current_failures();
+    coordinator.request_scan(request()).await.unwrap();
+    coordinator.request_scan(request()).await.unwrap();
+    let fourth = coordinator.health_snapshot();
+    let second_failures = coordinator.current_failures();
+    let asset_id = ArchiveReconciler::new(
+        WorkspacePaths::new(temp.path().join("workspace")),
+        source.clone(),
+    )
+    .scan()
+    .unwrap()
+    .assets
+    .into_iter()
+    .next()
+    .unwrap()
+    .asset_id;
 
     assert_eq!(first.attention_items, 1);
     assert_eq!(second.attention_items, 1);
+    assert_eq!(third.attention_items, 1);
+    assert_eq!(fourth.attention_items, 1);
     assert_eq!(
         second.failure_code_counts.get("module_guest_error"),
         Some(&1)
     );
+    assert_eq!(first_failures, second_failures);
+    assert_eq!(first_failures.len(), 1);
+    assert_eq!(first_failures[0].identity, format!("asset:{asset_id}"));
+    assert_eq!(first_failures[0].code, "module_guest_error");
+    assert!(!first_failures[0].critical);
+    assert_eq!(first_failures[0].asset_id, Some(asset_id));
+    database.shutdown().await.unwrap();
+    coordinator.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_manual_retry_clears_current_failure_without_a_follow_up_scan() {
+    let temp = TempDir::new().unwrap();
+    let runtime = fake_runtime(nutrition_batch());
+    runtime.fail_always();
+    let (coordinator, database, source) = coordinator_with_runtime(&temp, runtime.clone()).await;
+    let workspace = WorkspacePaths::new(temp.path().join("workspace"));
+    let inbox = workspace.source_inbox(&source);
+    std::fs::write(inbox.join("manual-retry.fixture"), b"retryable failure").unwrap();
+
+    for _ in 0..4 {
+        coordinator.request_scan(request()).await.unwrap();
+    }
+    let before_retry = coordinator.current_failures();
+    assert_eq!(before_retry.len(), 1);
+    let asset_id = before_retry[0].asset_id.unwrap();
+    assert_eq!(coordinator.health_snapshot().attention_items, 1);
+
+    assert!(coordinator.retry_asset(asset_id).await.is_err());
+    assert_eq!(coordinator.current_failures(), before_retry);
+    assert_eq!(coordinator.health_snapshot().attention_items, 1);
+
+    let mut events = coordinator.subscribe();
+    runtime.clear_fail_always();
+    coordinator.retry_asset(asset_id).await.unwrap();
+    let (capabilities, dashboards) = timeout(Duration::from_secs(1), async {
+        loop {
+            if let Ok(CoreEvent::DataChanged {
+                capabilities,
+                dashboards,
+            }) = events.recv().await
+            {
+                break (capabilities, dashboards);
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(coordinator.current_failures().is_empty());
+    assert_eq!(coordinator.health_snapshot().attention_items, 0);
+    assert!(capabilities.is_empty());
+    assert!(dashboards.is_empty());
     database.shutdown().await.unwrap();
     coordinator.shutdown().await.unwrap();
 }
@@ -330,6 +403,7 @@ async fn successful_processing_clears_current_attention_and_failure_code_count()
     );
     assert_eq!(recovered.attention_items, 0);
     assert!(recovered.failure_code_counts.is_empty());
+    assert!(coordinator.current_failures().is_empty());
     database.shutdown().await.unwrap();
     coordinator.shutdown().await.unwrap();
 }
