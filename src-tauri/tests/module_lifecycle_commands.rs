@@ -1,6 +1,6 @@
 use mfa_config::{AppSettings, SettingsStore};
 use mfa_contracts::ModuleId;
-use mfa_module_host::PackageInstaller;
+use mfa_module_host::{ModuleRegistry, PackageInstaller};
 use myfitanalytics::dialogs::DialogPort;
 use myfitanalytics::{AppState, CommandError};
 use semver::Version;
@@ -103,6 +103,30 @@ fn write_zip_package(path: &Path, files: &[(&str, &[u8])]) {
         archive.write_all(bytes).unwrap();
     }
     archive.finish().unwrap();
+}
+
+fn source_package(root: &Path, module_id: &str, wasm: &[u8], suffix: &str) -> PathBuf {
+    let entry_hash = format!("sha256:{:x}", Sha256::digest(wasm));
+    let manifest = serde_json::json!({
+        "module_type": "source",
+        "module_id": module_id,
+        "module_version": "1.0.0",
+        "package_format_version": "1.0.0",
+        "source_api_version": "1.0.0",
+        "mapping_version": "1.0.0",
+        "compatible_app_versions": [">=0.1.0"],
+        "provided_capabilities": ["body.weight"],
+        "accepted_file_patterns": ["*.csv"],
+        "artifact_signatures": [entry_hash],
+        "extension_contracts": [],
+        "settings_schema": {},
+        "entrypoint_hash": entry_hash,
+        "localization_namespace": "source.test"
+    });
+    let manifest = serde_json::to_vec(&manifest).unwrap();
+    let path = root.join(format!("{module_id}-1.0.0-{suffix}.mfasource"));
+    write_zip_package(&path, &[("module.json", &manifest), ("module.wasm", wasm)]);
+    path
 }
 
 fn dashboard_package(root: &Path) -> PathBuf {
@@ -260,6 +284,72 @@ async fn startup_and_refresh_keep_incompatible_installed_packages_inactive_but_v
         entry.error_code.as_deref(),
         Some("incompatible_app_version")
     );
+}
+
+#[tokio::test]
+async fn same_version_bundled_hash_mismatch_is_an_explicit_catalog_update() {
+    let (state, _root) = state();
+    let packages = TempDir::new().unwrap();
+    let old = source_package(
+        packages.path(),
+        "catalog-hash-source",
+        b"catalog-old",
+        "old",
+    );
+    let new = source_package(
+        packages.path(),
+        "catalog-hash-source",
+        b"catalog-new",
+        "new",
+    );
+    myfitanalytics::commands::choose_and_install_module_inner(
+        &state,
+        &MockDialogs::with_package(old),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    state.register_bundled_package(ModuleId::try_from("catalog-hash-source").unwrap(), new);
+
+    let catalog = myfitanalytics::commands::list_module_catalog_inner(&state)
+        .await
+        .unwrap();
+    let entry = catalog
+        .iter()
+        .find(|entry| entry.module.id == "catalog-hash-source")
+        .unwrap();
+    assert_eq!(entry.install_state, "update");
+    assert_eq!(entry.available_version.as_deref(), Some("1.0.0"));
+}
+
+#[tokio::test]
+async fn explicit_update_activates_the_exact_bundled_catalog_hash() {
+    let (state, root) = state();
+    let packages = TempDir::new().unwrap();
+    let old = source_package(packages.path(), "exact-update-source", b"exact-old", "old");
+    let new = source_package(packages.path(), "exact-update-source", b"exact-new", "new");
+    myfitanalytics::commands::choose_and_install_module_inner(
+        &state,
+        &MockDialogs::with_package(old),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let module_id = ModuleId::try_from("exact-update-source").unwrap();
+    let installer = PackageInstaller::new(root.path().join("modules"));
+    let expected_hash = installer.inspect(&new).unwrap().package_hash;
+    state.register_bundled_package(module_id, new);
+
+    let updated =
+        myfitanalytics::commands::update_module_inner(&state, "exact-update-source".to_owned())
+            .await
+            .unwrap();
+    assert_eq!(updated.id, "exact-update-source");
+    let installed = PackageInstaller::new(root.path().join("modules"))
+        .list()
+        .unwrap();
+    assert_eq!(installed.len(), 1);
+    assert_eq!(installed[0].package_hash, expected_hash);
 }
 
 #[tokio::test]

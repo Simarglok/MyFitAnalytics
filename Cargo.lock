@@ -2720,6 +2720,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-analytics"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mfa-contracts",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "mfa-archive"
 version = "0.1.0"
 dependencies = [
@@ -2758,6 +2770,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mfa-dashboard-base"
+version = "0.1.0"
+dependencies = [
+ "mfa-contracts",
+ "mfa-dashboard-host",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "mfa-dashboard-host"
+version = "0.1.0"
+dependencies = [
+ "mfa-analytics",
+ "mfa-contracts",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "mfa-db"
 version = "0.1.0"
 dependencies = [
@@ -2785,6 +2821,7 @@ dependencies = [
  "mfa-module-host",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -2798,9 +2835,11 @@ dependencies = [
  "mfa-archive",
  "mfa-config",
  "mfa-contracts",
+ "mfa-dashboard-host",
  "mfa-db",
  "mfa-ingestion",
  "mfa-module-host",
+ "myfitanalytics",
  "serde_json",
  "sha2",
  "tempfile",
@@ -2816,6 +2855,7 @@ dependencies = [
  "jsonschema",
  "mfa-config",
  "mfa-contracts",
+ "mfa-dashboard-host",
  "mfa-module-host",
  "semver",
  "serde",
@@ -2938,9 +2978,12 @@ dependencies = [
 name = "myfitanalytics"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "mfa-analytics",
  "mfa-archive",
  "mfa-config",
  "mfa-contracts",
+ "mfa-dashboard-host",
  "mfa-db",
  "mfa-ingestion",
  "mfa-module-host",

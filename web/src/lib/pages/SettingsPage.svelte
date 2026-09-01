@@ -6,6 +6,7 @@
   import { message } from '../i18n';
 
   export let transport: AppTransport;
+  export let onMutation: () => Promise<void> | void = () => undefined;
 
   let catalog: ModuleCatalogEntry[] = [];
   let workspace: WorkspaceView | null = null;
@@ -14,6 +15,7 @@
   let activeProviders: Record<string, string> = {};
   let pendingUninstall: string | null = null;
   let loading = true;
+  let reloadGeneration = 0;
 
   const localizedErrors: Record<string, string> = {
     workspace_required: message('settings.error.workspace_required'),
@@ -31,11 +33,19 @@
   });
 
   async function reload(): Promise<void> {
+    const generation = ++reloadGeneration;
     loading = true;
     try {
+      const bootstrapPromise = transport.getBootstrapState();
       const catalogPromise = transport.listModuleCatalog?.() ?? Promise.resolve([]);
       const workspacePromise = transport.getWorkspaceView?.() ?? Promise.resolve(null);
-      const [loadedCatalog, loadedWorkspace] = await Promise.all([catalogPromise, workspacePromise]);
+      const [bootstrap, loadedCatalog, loadedWorkspace] = await Promise.all([
+        bootstrapPromise,
+        catalogPromise,
+        workspacePromise,
+      ]);
+      if (generation !== reloadGeneration) return;
+      activeProviders = { ...bootstrap.activeProviders };
       catalog = loadedCatalog.slice().sort((left, right) => {
         const categoryDifference = categoryOrder(left.module.moduleType) - categoryOrder(right.module.moduleType);
         return categoryDifference || left.module.id.localeCompare(right.module.id);
@@ -44,9 +54,10 @@
       errorCode = '';
       errorMessage = '';
     } catch (error: unknown) {
+      if (generation !== reloadGeneration) return;
       showError(error);
     } finally {
-      loading = false;
+      if (generation === reloadGeneration) loading = false;
     }
   }
 
@@ -56,6 +67,7 @@
       errorMessage = '';
       await action();
       await reload();
+      await onMutation();
     } catch (error: unknown) {
       showError(error);
     }
@@ -101,7 +113,9 @@
   }
 
   async function selectProvider(capability: string, moduleId: string): Promise<void> {
-    const selection = await transport.selectModuleProvider?.(capability, moduleId);
+    const selection = transport.selectProvider
+      ? await transport.selectProvider(capability, moduleId)
+      : await transport.selectModuleProvider?.(capability, moduleId);
     if (selection) activeProviders = selection.activeProviders;
   }
 
@@ -149,6 +163,13 @@
       {message('settings.choose_workspace')}
     </button>
   </div>
+
+  <label class="locale-select">
+    {message('settings.locale')}
+    <select aria-label={message('settings.locale')}>
+      <option value="en">{message('settings.locale_english')}</option>
+    </select>
+  </label>
 
   {#if loading}
     <p aria-live="polite">{message('settings.loading')}</p>
@@ -215,7 +236,7 @@
               </button>
             {/if}
 
-            {#each entry.module.providedCapabilities ?? [] as capability}
+            {#each entry.module.providedCapabilities ?? [] as capability (capability)}
               <button type="button" data-action="provider" data-module-id={entry.module.id} on:click={() => void run(() => selectProvider(capability, entry.module.id))}>
                 {message('settings.use_for')} {capability}
               </button>

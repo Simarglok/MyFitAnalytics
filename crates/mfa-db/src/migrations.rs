@@ -4,7 +4,7 @@ use duckdb::{Connection, params};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 struct Migration {
     version: u32,
@@ -12,7 +12,7 @@ struct Migration {
     sql: &'static str,
 }
 
-fn migrations() -> [Migration; 3] {
+fn migrations() -> [Migration; 4] {
     [
         Migration {
             version: 1,
@@ -28,6 +28,11 @@ fn migrations() -> [Migration; 3] {
             version: 3,
             name: "active_snapshots",
             sql: include_str!("../migrations/0003_active_snapshots.sql"),
+        },
+        Migration {
+            version: 4,
+            name: "user_phase_events",
+            sql: include_str!("../migrations/0004_user_phase_events.sql"),
         },
     ]
 }

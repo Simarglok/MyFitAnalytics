@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "modules/sdk/rust", "modules/sources/hevy", "modules/sources/mynetdiary", "src-tauri"]
+members = [
+    "crates/*",
+    "modules/sdk/rust",
+    "modules/sources/hevy",
+    "modules/sources/mynetdiary",
+    "modules/dashboards/base",
+    "src-tauri",
+]
 # Installable source module crates join the workspace when their plans add them.
 
 [workspace.package]

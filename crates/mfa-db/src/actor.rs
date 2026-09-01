@@ -1,8 +1,8 @@
 use crate::command::{
-    DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, ListQualityItemsResult,
-    MarkInterruptedResult, QueryAttempt, QueryAttemptResult, ReconcileArchiveInventory,
-    ReconcileArchiveInventoryResult, RegisterAsset, RegisterAssetResult, RegisterReceipt,
-    RegisterReceiptResult, StartAttempt, StartAttemptResult, ViewResponse,
+    DatabaseCommand, FailAttempt, FailAttemptResult, HealthCheckResult, ListActiveSnapshotKeys,
+    ListQualityItemsResult, MarkInterruptedResult, QueryAttempt, QueryAttemptResult,
+    ReconcileArchiveInventory, ReconcileArchiveInventoryResult, RegisterAsset, RegisterAssetResult,
+    RegisterReceipt, RegisterReceiptResult, StartAttempt, StartAttemptResult, ViewResponse,
 };
 use crate::error::DatabaseError;
 use crate::fault::{DatabaseFailurePoint, DatabaseFaultInjector};
@@ -12,6 +12,7 @@ use crate::provenance::{
     ExtensionRecord, LineageLink, RecordCounts, SnapshotCommitResult, SourceRecord,
     ValidatedSnapshotBatch, canonical_entity_key, canonical_identity,
 };
+use crate::snapshot;
 use crate::validation::{self, ValidationError};
 use crate::views::{QuerySnapshot, QueryView, SnapshotResponse, ViewRequest};
 use chrono::Utc;
@@ -91,11 +92,26 @@ fn process_command(
         DatabaseCommand::ListQualityItems(response) => {
             let _ = response.send(list_quality_items(connection));
         }
+        DatabaseCommand::CreatePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::create_phase_event(connection, command));
+        }
+        DatabaseCommand::UpdatePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::update_phase_event(connection, command));
+        }
+        DatabaseCommand::DeletePhaseEvent(command, response) => {
+            let _ = response.send(snapshot::delete_phase_event(connection, command));
+        }
+        DatabaseCommand::ListPhaseEvents(response) => {
+            let _ = response.send(snapshot::list_phase_events(connection));
+        }
         DatabaseCommand::QueryView(command, response) => {
             let _ = response.send(query_view(connection, command));
         }
         DatabaseCommand::QuerySnapshot(command, response) => {
             let _ = response.send(query_snapshot(connection, command));
+        }
+        DatabaseCommand::ListActiveSnapshotKeys(command, response) => {
+            let _ = response.send(list_active_snapshot_keys(connection, command));
         }
         DatabaseCommand::CommitSnapshot(command, response) => {
             let _ = response.send(commit_snapshot(connection, command.0, fault_injector));
@@ -1066,6 +1082,31 @@ fn query_snapshot(
             .filter(|item| item.source_asset_id == Some(asset_id))
             .collect(),
     })
+}
+
+fn list_active_snapshot_keys(
+    connection: &Connection,
+    command: ListActiveSnapshotKeys,
+) -> Result<Vec<crate::provenance::LogicalSnapshotKey>, DatabaseError> {
+    let prefix = format!("{}:", command.source_module_id);
+    let mut statement = connection
+        .prepare(
+            "SELECT logical_snapshot_key
+             FROM active_snapshot
+             WHERE starts_with(logical_snapshot_key, ?)
+             ORDER BY logical_snapshot_key",
+        )
+        .map_err(DatabaseError::from_duckdb)?;
+    let rows = statement
+        .query_map(params![prefix], |row| row.get::<_, String>(0))
+        .map_err(DatabaseError::from_duckdb)?;
+    rows.map(|row| {
+        let value = row.map_err(DatabaseError::from_duckdb)?;
+        value.parse().map_err(|error| DatabaseError::Command {
+            detail: format!("stored logical snapshot key is invalid: {error}"),
+        })
+    })
+    .collect()
 }
 
 fn query_source_records(

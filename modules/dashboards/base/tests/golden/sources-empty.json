@@ -1,0 +1,70 @@
+{
+  "title_key": "base.sources.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.modules",
+        "label": "base.sources.modules",
+        "value": {
+          "state": "missing_capability"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.providers",
+        "label": "base.sources.providers",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.sources.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.snapshots",
+        "label": "base.sources.snapshots",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.sources.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.quality",
+        "label": "base.sources.quality",
+        "value": {
+          "action": "import_data",
+          "available": false,
+          "message_key": "base.sources.missing",
+          "state": {
+            "type": "missing_capability"
+          }
+        }
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "sources.status",
+        "state": {
+          "type": "missing_capability"
+        },
+        "message_key": "base.sources.missing"
+      }
+    }
+  ]
+}

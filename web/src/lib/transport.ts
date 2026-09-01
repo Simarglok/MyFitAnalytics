@@ -1,17 +1,29 @@
 import type {
   AttemptView,
   BootstrapState,
+  DashboardPageView,
+  DateRangeView,
   IngestionStatus,
   ModuleCatalogEntry,
   ModuleView,
   QualityItem,
   ScanTicket,
   DataChangedEvent,
+  NavigationView,
+  PhaseEventInput,
+  PhaseEventView,
+  ProviderView,
   WorkspaceView,
-} from './types';
+} from "./types";
 
 export interface AppTransport {
   getBootstrapState(): Promise<BootstrapState>;
+  getNavigation(): Promise<NavigationView>;
+  getDashboard(
+    moduleId: string,
+    pageId: string,
+    range: DateRangeView,
+  ): Promise<DashboardPageView>;
   listModules(): Promise<ModuleView[]>;
   refreshNow(): Promise<ScanTicket>;
   getIngestionStatus(): Promise<IngestionStatus>;
@@ -25,8 +37,17 @@ export interface AppTransport {
   setModuleEnabled?(moduleId: string, enabled: boolean): Promise<ModuleView>;
   updateModule?(moduleId: string): Promise<ModuleView>;
   uninstallModule?(moduleId: string): Promise<void>;
-  selectModuleProvider?(capability: string, moduleId: string): Promise<ProviderSelection>;
-  subscribeDataChanged(listener: (event: DataChangedEvent) => void): Promise<() => void>;
+  selectModuleProvider?(
+    capability: string,
+    moduleId: string,
+  ): Promise<ProviderSelection>;
+  selectProvider?(capability: string, moduleId: string): Promise<ProviderView>;
+  listPhaseEvents(): Promise<PhaseEventView[]>;
+  savePhaseEvent(input: PhaseEventInput): Promise<PhaseEventView>;
+  deletePhaseEvent(phaseEventId: string): Promise<void>;
+  subscribeDataChanged(
+    listener: (event: DataChangedEvent) => void,
+  ): Promise<() => void>;
 }
 
 export interface ProviderSelection {
@@ -43,18 +64,25 @@ export class TransportError extends Error {
 
   constructor(code: string, message: string) {
     super(message);
-    this.name = 'TransportError';
+    this.name = "TransportError";
     this.code = code;
   }
 }
 
 export function normalizeTransportError(error: unknown): TransportError {
-  if (typeof error === 'object' && error !== null) {
+  if (typeof error === "object" && error !== null) {
     const candidate = error as Partial<SerializedCommandError>;
-    if (typeof candidate.code === 'string' && typeof candidate.message === 'string') {
+    if (
+      typeof candidate.code === "string" &&
+      typeof candidate.message === "string"
+    ) {
       return new TransportError(candidate.code, candidate.message);
     }
   }
-  if (error instanceof Error) return new TransportError('transport_error', error.message);
-  return new TransportError('transport_error', 'The desktop transport is unavailable.');
+  if (error instanceof Error)
+    return new TransportError("transport_error", error.message);
+  return new TransportError(
+    "transport_error",
+    "The desktop transport is unavailable.",
+  );
 }

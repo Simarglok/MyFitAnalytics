@@ -1,0 +1,92 @@
+{
+  "title_key": "base.strength.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.sessions",
+        "label": "base.strength.sessions",
+        "value": {
+          "available": true,
+          "value": {
+            "sessions": 4
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.duration",
+        "label": "base.strength.duration",
+        "value": {
+          "available": true,
+          "value": {
+            "sessions": 4
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.sets",
+        "label": "base.strength.sets",
+        "value": {
+          "available": true,
+          "value": {
+            "sets": 24
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "strength.e1rm",
+        "label": "base.strength.e1rm",
+        "value": {
+          "available": true,
+          "value": {
+            "sets": 24
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "strength.sessions.calendar",
+        "chart_type": "calendar_heatmap",
+        "series": [
+          {
+            "name": "base.strength.sessions",
+            "points": []
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "strength.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.strength.ready"
+      }
+    }
+  ]
+}

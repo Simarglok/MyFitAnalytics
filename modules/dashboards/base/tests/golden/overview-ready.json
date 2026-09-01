@@ -1,0 +1,95 @@
+{
+  "title_key": "base.overview.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.body_weight",
+        "label": "base.overview.body_weight",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "overview.nutrition",
+        "label": "base.overview.nutrition",
+        "value": {
+          "available": true,
+          "value": {
+            "days": [
+              {
+                "calories_kcal": 2400.0,
+                "local_date": "2026-01-01",
+                "logged_item_count": 2,
+                "quality": "complete"
+              }
+            ],
+            "tdee": {
+              "coverage": {
+                "complete_nutrition_days": 1
+              },
+              "state": "insufficient_coverage"
+            },
+            "trailing7dMeanCalories": [
+              {
+                "local_date": "2026-01-01",
+                "value": 2400.0
+              }
+            ]
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "chart",
+      "value": {
+        "key": "overview.trend",
+        "chart_type": "line",
+        "series": [
+          {
+            "name": "base.overview.trend",
+            "points": [
+              [
+                "2026-01-01",
+                82.5
+              ],
+              [
+                "2026-01-02",
+                82.3
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "overview.quality",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.overview.quality_ready"
+      }
+    }
+  ]
+}

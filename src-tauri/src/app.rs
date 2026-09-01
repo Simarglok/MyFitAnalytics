@@ -10,7 +10,11 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 const CORE_ENGLISH_CATALOG: &[u8] = include_bytes!("../../modules/locales/en/messages.json");
-const BUNDLED_SOURCE_PACKAGES: [&str; 2] = ["mynetdiary", "hevy"];
+const BUNDLED_PACKAGES: [(&str, &str); 3] = [
+    ("mynetdiary", "mynetdiary.mfasource"),
+    ("hevy", "hevy.mfasource"),
+    ("base", "base.mfadashboard"),
+];
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     tauri::Builder::default()
@@ -26,6 +30,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             commands::update_module,
             commands::uninstall_module,
             commands::select_module_provider,
+            commands::get_navigation,
+            commands::get_dashboard,
+            commands::select_provider,
+            commands::save_phase_event,
+            commands::list_phase_events,
+            commands::delete_phase_event,
             commands::refresh_now,
             commands::get_ingestion_status,
             commands::list_quality_items,
@@ -76,10 +86,10 @@ fn install_bundled_modules(
 }
 
 fn bundled_package_paths(resource_root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    BUNDLED_SOURCE_PACKAGES
+    BUNDLED_PACKAGES
         .iter()
-        .map(|module| {
-            let package = resource_root.join(format!("{module}.mfasource"));
+        .map(|(_, filename)| {
+            let package = resource_root.join(filename);
             match fs::metadata(&package) {
                 Ok(metadata) if metadata.is_file() => Ok(package),
                 Ok(_) => Err(format!("bundled module resource is not a file: {package:?}").into()),
@@ -159,14 +169,15 @@ mod tests {
             .expect("bundled source packages must declare an explicit allowlist");
         let expected = serde_json::json!({
             "../dist/modules/mynetdiary.mfasource": "modules/mynetdiary.mfasource",
-            "../dist/modules/hevy.mfasource": "modules/hevy.mfasource"
+            "../dist/modules/hevy.mfasource": "modules/hevy.mfasource",
+            "../dist/modules/base.mfadashboard": "modules/base.mfadashboard"
         });
         assert_eq!(resources, expected.as_object().unwrap());
         assert!(!resources.keys().any(|path| path.contains('*')));
     }
 
     #[test]
-    fn bundled_package_paths_require_mynetdiary_and_hevy() {
+    fn bundled_package_paths_require_all_production_packages() {
         let temp = TempDir::new().unwrap();
         let resource_root = temp.path().join("modules");
         std::fs::create_dir_all(&resource_root).unwrap();
@@ -176,12 +187,17 @@ mod tests {
         assert!(error.to_string().contains("mynetdiary.mfasource"));
 
         std::fs::write(resource_root.join("mynetdiary.mfasource"), b"synthetic").unwrap();
+        let error = bundled_package_paths(&resource_root).unwrap_err();
+        assert!(error.to_string().contains("base.mfadashboard"));
+
+        std::fs::write(resource_root.join("base.mfadashboard"), b"synthetic").unwrap();
         let packages = bundled_package_paths(&resource_root).unwrap();
         assert_eq!(
             packages,
             vec![
                 resource_root.join("mynetdiary.mfasource"),
-                resource_root.join("hevy.mfasource")
+                resource_root.join("hevy.mfasource"),
+                resource_root.join("base.mfadashboard")
             ]
         );
     }

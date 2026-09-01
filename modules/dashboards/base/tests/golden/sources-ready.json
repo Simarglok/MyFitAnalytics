@@ -1,0 +1,109 @@
+{
+  "title_key": "base.sources.title",
+  "blocks": [
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.modules",
+        "label": "base.sources.modules",
+        "value": {
+          "state": "ready"
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.providers",
+        "label": "base.sources.providers",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.snapshots",
+        "label": "base.sources.snapshots",
+        "value": {
+          "available": true,
+          "value": [
+            {
+              "date": "2026-01-01",
+              "value": 82.5
+            },
+            {
+              "date": "2026-01-02",
+              "value": 82.3
+            }
+          ]
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "card",
+      "value": {
+        "key": "sources.quality",
+        "label": "base.sources.quality",
+        "value": {
+          "available": true,
+          "value": {
+            "days": [
+              {
+                "calories_kcal": 2400.0,
+                "local_date": "2026-01-01",
+                "logged_item_count": 2,
+                "quality": "complete"
+              }
+            ],
+            "tdee": {
+              "coverage": {
+                "complete_nutrition_days": 1
+              },
+              "state": "insufficient_coverage"
+            },
+            "trailing7dMeanCalories": [
+              {
+                "local_date": "2026-01-01",
+                "value": 2400.0
+              }
+            ]
+          }
+        },
+        "presentation": {
+          "summary_key": "base.card_available"
+        }
+      }
+    },
+    {
+      "type": "status_panel",
+      "value": {
+        "key": "sources.status",
+        "state": {
+          "type": "ready"
+        },
+        "message_key": "base.sources.ready"
+      }
+    }
+  ]
+}

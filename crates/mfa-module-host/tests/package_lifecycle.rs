@@ -374,6 +374,25 @@ fn registry_reconstructs_from_manifests_without_mutable_index() {
     assert_eq!(reconstructed[0].module_id, installed.module_id);
 }
 
+fn same_version_source_package(
+    packages: &TempDir,
+    module_id: &str,
+    version: &str,
+    wasm: &[u8],
+    suffix: &str,
+) -> PathBuf {
+    let path = packages
+        .path()
+        .join(format!("{module_id}-{version}-{suffix}.mfasource"));
+    make_package(
+        &path,
+        "mfasource",
+        source_manifest(module_id, version, &sha256(wasm)),
+        wasm,
+    );
+    path
+}
+
 #[test]
 fn bundled_catalog_installs_first_profile_defaults_and_reports_updates_without_reinstalling() {
     let store = TempDir::new().unwrap();
@@ -420,6 +439,220 @@ fn bundled_catalog_installs_first_profile_defaults_and_reports_updates_without_r
         .install_bundled_defaults(std::slice::from_ref(&new_path))
         .unwrap();
     assert!(installer.list().unwrap().is_empty());
+}
+
+#[test]
+fn bundled_same_version_hash_refresh_auto_rotates_prior_bundled_active_and_is_idempotent() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let old = same_version_source_package(
+        &packages,
+        "hash-refresh-source",
+        "1.0.0",
+        b"old-bundled",
+        "old",
+    );
+    let new = same_version_source_package(
+        &packages,
+        "hash-refresh-source",
+        "1.0.0",
+        b"new-bundled",
+        "new",
+    );
+
+    let old_info = installer
+        .install_bundled_defaults(std::slice::from_ref(&old))
+        .unwrap();
+    assert_eq!(
+        old_info[0].package_hash,
+        installer.list().unwrap()[0].package_hash
+    );
+    let expected_new_hash = installer.inspect(&new).unwrap().package_hash;
+
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new))
+        .unwrap();
+    let rotated = installer.list().unwrap();
+    assert_eq!(rotated.len(), 1);
+    assert_eq!(rotated[0].package_hash, expected_new_hash);
+    assert!(rotated[0].enabled);
+
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new))
+        .unwrap();
+    assert_eq!(installer.list().unwrap(), rotated);
+}
+
+#[test]
+fn bundled_same_version_hash_refresh_preserves_custom_active_package() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let old = same_version_source_package(
+        &packages,
+        "custom-active-source",
+        "1.0.0",
+        b"old-bundled",
+        "old",
+    );
+    let custom = same_version_source_package(
+        &packages,
+        "custom-active-source",
+        "1.0.0",
+        b"custom-active",
+        "custom",
+    );
+    let new = same_version_source_package(
+        &packages,
+        "custom-active-source",
+        "1.0.0",
+        b"new-bundled",
+        "new",
+    );
+
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&old))
+        .unwrap();
+    let custom_installed = installer.install(&custom).unwrap();
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new))
+        .unwrap();
+
+    let active = installer.list().unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].package_hash, custom_installed.package_hash);
+    let updates = installer.available_bundled_updates().unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(
+        updates[0].available.package_hash,
+        installer.inspect(&new).unwrap().package_hash
+    );
+}
+
+#[test]
+fn bundled_hash_refresh_preserves_disabled_and_uninstalled_modules() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let disabled_old = same_version_source_package(
+        &packages,
+        "disabled-refresh-source",
+        "1.0.0",
+        b"disabled-old",
+        "old",
+    );
+    let disabled_new = same_version_source_package(
+        &packages,
+        "disabled-refresh-source",
+        "1.0.0",
+        b"disabled-new",
+        "new",
+    );
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&disabled_old))
+        .unwrap();
+    installer
+        .set_enabled(
+            &ModuleId::try_from("disabled-refresh-source").unwrap(),
+            false,
+        )
+        .unwrap();
+    let disabled_before = installer.list().unwrap();
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&disabled_new))
+        .unwrap();
+    assert_eq!(installer.list().unwrap(), disabled_before);
+    assert!(!installer.list().unwrap()[0].enabled);
+
+    let uninstalled_old = same_version_source_package(
+        &packages,
+        "uninstalled-refresh-source",
+        "1.0.0",
+        b"uninstalled-old",
+        "old",
+    );
+    let uninstalled_new = same_version_source_package(
+        &packages,
+        "uninstalled-refresh-source",
+        "1.0.0",
+        b"uninstalled-new",
+        "new",
+    );
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&uninstalled_old))
+        .unwrap();
+    let uninstalled_id = ModuleId::try_from("uninstalled-refresh-source").unwrap();
+    installer.set_enabled(&uninstalled_id, false).unwrap();
+    installer.uninstall(&uninstalled_id).unwrap();
+    let state_path = store.path().join("state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["modules"][uninstalled_id.as_str()] = json!(true);
+    fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&uninstalled_new))
+        .unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    assert_eq!(
+        state["uninstalled_modules"],
+        json!([uninstalled_id.as_str()])
+    );
+    assert!(
+        !installer
+            .list()
+            .unwrap()
+            .iter()
+            .any(|module| module.module_id == uninstalled_id)
+    );
+}
+
+#[test]
+fn ambiguous_same_version_hash_mismatch_is_reported_as_an_update_without_auto_rotation() {
+    let store = TempDir::new().unwrap();
+    let packages = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(store.path());
+    let old = same_version_source_package(
+        &packages,
+        "ambiguous-refresh-source",
+        "1.0.0",
+        b"ambiguous-old",
+        "old",
+    );
+    let new = same_version_source_package(
+        &packages,
+        "ambiguous-refresh-source",
+        "1.0.0",
+        b"ambiguous-new",
+        "new",
+    );
+    installer.install(&old).unwrap();
+    let new_hash = installer.inspect(&new).unwrap().package_hash;
+    let state_path = store.path().join("state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["bundled_catalog"]["ambiguous-refresh-source"] = json!({
+        "module_version": "1.0.0",
+        "package_hash": new_hash,
+    });
+    fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+
+    installer
+        .install_bundled_defaults(std::slice::from_ref(&new))
+        .unwrap();
+    let active = installer.list().unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        active[0].package_hash,
+        installer.inspect(&old).unwrap().package_hash
+    );
+    let updates = installer.available_bundled_updates().unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].available.package_hash, new_hash);
+    assert_eq!(
+        updates[0].installed.as_ref().unwrap().package_hash,
+        active[0].package_hash
+    );
 }
 
 #[test]

@@ -32,7 +32,8 @@
     },
     "resources": {
       "../dist/modules/mynetdiary.mfasource": "modules/mynetdiary.mfasource",
-      "../dist/modules/hevy.mfasource": "modules/hevy.mfasource"
+      "../dist/modules/hevy.mfasource": "modules/hevy.mfasource",
+      "../dist/modules/base.mfadashboard": "modules/base.mfadashboard"
     }
   }
 }

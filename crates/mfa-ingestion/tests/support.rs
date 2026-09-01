@@ -13,6 +13,7 @@ pub struct FakeRuntime {
     batch: SourceBatch,
     invocations: Arc<Mutex<usize>>,
     fail_next: Arc<Mutex<bool>>,
+    fail_always: Arc<Mutex<bool>>,
 }
 
 impl SourceInvoker for FakeRuntime {
@@ -45,7 +46,8 @@ impl SourceInvoker for FakeRuntime {
             let mut invocations = self.invocations.lock().unwrap();
             *invocations += 1;
             let mut fail_next = self.fail_next.lock().unwrap();
-            if *fail_next {
+            let fail_always = *self.fail_always.lock().unwrap();
+            if *fail_next || fail_always {
                 *fail_next = false;
                 return Err(RuntimeError::new(
                     "module_guest_error",
@@ -62,6 +64,7 @@ pub fn fake_runtime(batch: SourceBatch) -> Arc<FakeRuntime> {
         batch,
         invocations: Arc::new(Mutex::new(0)),
         fail_next: Arc::new(Mutex::new(false)),
+        fail_always: Arc::new(Mutex::new(false)),
     })
 }
 
@@ -69,6 +72,16 @@ impl FakeRuntime {
     #[allow(dead_code)]
     pub fn fail_next(&self) {
         *self.fail_next.lock().unwrap() = true;
+    }
+
+    #[allow(dead_code)]
+    pub fn fail_always(&self) {
+        *self.fail_always.lock().unwrap() = true;
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_fail_always(&self) {
+        *self.fail_always.lock().unwrap() = false;
     }
 }
 

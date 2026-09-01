@@ -1,10 +1,10 @@
-import { defineConfig } from 'vitest/config';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { defineConfig } from "vitest/config";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 export default defineConfig({
   plugins: [svelte()],
   resolve: {
-    conditions: ['browser'],
+    conditions: ["browser"],
   },
   clearScreen: false,
   server: {
@@ -12,7 +12,7 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
-    environment: 'jsdom',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    environment: "jsdom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

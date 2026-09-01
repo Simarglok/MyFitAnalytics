@@ -23,6 +23,10 @@
     "package_format_version": { "$ref": "#/$defs/version" },
     "dashboard_api_version": { "$ref": "#/$defs/version" },
     "entrypoint_hash": { "type": "string", "pattern": "^sha256:[A-Fa-f0-9]+$" },
+    "artifact_signatures": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^sha256:[A-Fa-f0-9]+$" }
+    },
     "compatible_app_versions": {
       "type": "array",
       "minItems": 1,

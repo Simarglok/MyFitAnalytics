@@ -2,6 +2,7 @@ use crate::limits::RuntimeLimits;
 use crate::package::InstalledModule;
 use crate::runtime::RuntimeError;
 use mfa_contracts::{DashboardDocument, DashboardInput, ModuleManifest};
+use mfa_dashboard_host::validate_raw_document_json;
 use wasmtime::{Engine, Store, StoreLimits};
 
 pub(crate) struct DashboardStoreState {
@@ -15,24 +16,12 @@ pub(crate) async fn invoke(
     input: DashboardInput,
     limits: RuntimeLimits,
 ) -> Result<DashboardDocument, RuntimeError> {
-    let manifest = match &module.manifest {
-        ModuleManifest::Dashboard(manifest) => manifest,
-        _ => {
-            return Err(RuntimeError::new(
-                "module_type_mismatch",
-                "dashboard invocation requires a dashboard manifest",
-            ));
-        }
+    let ModuleManifest::Dashboard(_) = &module.manifest else {
+        return Err(RuntimeError::new(
+            "module_type_mismatch",
+            "dashboard invocation requires a dashboard manifest",
+        ));
     };
-    for requirement in &manifest.required_capabilities {
-        if !input.capabilities.contains_key(&requirement.capability) {
-            return Err(RuntimeError::new(
-                "missing_capability_input",
-                format!("missing capability {}", requirement.capability),
-            ));
-        }
-    }
-
     let state = DashboardStoreState {
         limits: wasmtime::StoreLimitsBuilder::new()
             .memory_size(limits.max_memory_bytes)
@@ -74,8 +63,10 @@ pub(crate) async fn invoke(
         .map_err(|error| RuntimeError::from_wasmtime("module_invoke_error", error))?;
     let output = output.map_err(|error| RuntimeError::new("module_guest_error", error))?;
     ensure_output_size(&output, limits.max_output_bytes)?;
-    let document: DashboardDocument = serde_json::from_str(&output)
+    let raw: serde_json::Value = serde_json::from_str(&output)
         .map_err(|error| RuntimeError::new("module_malformed_output", error.to_string()))?;
+    let document: DashboardDocument = validate_raw_document_json(&raw, &input)
+        .map_err(|error| RuntimeError::new("module_malformed_output", error.code()))?;
     if !document.is_declarative() {
         return Err(RuntimeError::new(
             "module_non_declarative_output",

@@ -4,6 +4,7 @@ pub mod error;
 pub mod fault;
 pub mod migrations;
 pub mod provenance;
+pub mod snapshot;
 pub mod validation;
 pub mod views;
 
@@ -14,13 +15,14 @@ use std::thread::JoinHandle;
 use tokio::sync::{mpsc, oneshot};
 
 pub use command::{
-    ArchiveAssetRecord, AssetRegistration, CommitSnapshot, DatabaseCommand, FailAttempt,
-    FailAttemptResult, HealthCheck, HealthCheckResult, IntoDatabaseCommand, ListQualityItems,
+    ArchiveAssetRecord, AssetRegistration, CommitSnapshot, CreatePhaseEvent, DatabaseCommand,
+    DeletePhaseEvent, FailAttempt, FailAttemptResult, HealthCheck, HealthCheckResult,
+    IntoDatabaseCommand, ListActiveSnapshotKeys, ListPhaseEvents, ListQualityItems,
     ListQualityItemsResult, MarkInterrupted, MarkInterruptedResult, QueryAttempt,
     QueryAttemptResult, QuerySnapshot, QueryView, ReconcileArchive, ReconcileArchiveInventory,
     ReconcileArchiveInventoryResult, ReconcileArchiveResult, RegisterAsset, RegisterAssetResult,
     RegisterReceipt, RegisterReceiptResult, Shutdown, SnapshotResponse, StartAttempt,
-    StartAttemptResult,
+    StartAttemptResult, UpdatePhaseEvent,
 };
 pub use error::DatabaseError;
 pub use fault::{

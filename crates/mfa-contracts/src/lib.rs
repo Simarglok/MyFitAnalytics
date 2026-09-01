@@ -9,9 +9,9 @@ pub mod observation;
 pub use asset::{AssetMetadata, ReadOnlyAsset};
 pub use capability::CapabilityId;
 pub use dashboard::{
-    AvailabilityState, CoverageRule, DashboardBlock, DashboardCard, DashboardChart,
-    DashboardDocument, DashboardInput, DashboardRequirement, DashboardSeries, DashboardStatusPanel,
-    DashboardTable,
+    AvailabilityState, CoverageRule, DashboardBlock, DashboardCard, DashboardCardPresentation,
+    DashboardChart, DashboardDocument, DashboardInput, DashboardRequirement, DashboardSeries,
+    DashboardStatusPanel, DashboardSummaryValue, DashboardTable,
 };
 pub use error::{AssetReadError, ContractError};
 pub use locale::{LocalDate, LocalDateTime, UtcInstant};

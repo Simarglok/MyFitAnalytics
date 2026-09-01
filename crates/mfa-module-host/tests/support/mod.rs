@@ -172,9 +172,15 @@ pub fn fixture_path(name: &str) -> PathBuf {
 }
 
 pub fn dashboard_input() -> DashboardInput {
+    dashboard_input_for_page(None)
+}
+
+pub fn dashboard_input_for_page(page_id: Option<&str>) -> DashboardInput {
     let mut capabilities = BTreeMap::new();
     capabilities.insert(CapabilityId::try_from("body.weight").unwrap(), json!(82.5));
     DashboardInput {
+        page_id: page_id.map(str::to_owned),
+        availability_state: None,
         capabilities,
         extensions: BTreeMap::new(),
     }

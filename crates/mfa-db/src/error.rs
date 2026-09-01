@@ -27,6 +27,8 @@ pub enum DatabaseError {
         contract_id: String,
         contract_version: String,
     },
+    #[error("phase event not found: {phase_event_id}")]
+    PhaseEventNotFound { phase_event_id: uuid::Uuid },
     #[error("database shutdown failed: {detail}")]
     Shutdown { detail: String },
 }
@@ -45,6 +47,7 @@ impl DatabaseError {
             Self::FaultInjected { .. } => "database_fault_injected",
             Self::Validation { code, .. } => code,
             Self::ExtensionContractMissing { .. } => "extension_contract_missing",
+            Self::PhaseEventNotFound { .. } => "phase_event_not_found",
             Self::Shutdown { .. } => "database_shutdown_failed",
         }
     }
