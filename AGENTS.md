@@ -40,3 +40,14 @@ including Codex and Hermes.
   it and the exact target has been verified.
 - After a remote operation, report the account used, branch, commit, and resulting
   pull request or other remote object.
+
+## Project documentation
+
+The authoritative project documentation vault is:
+
+`/Users/simarglok/Library/Mobile Documents/iCloud~md~obsidian/Documents/Simarglok/MyFitAnalytics`
+
+Agents doing planning, implementation, review, or project-status work must
+read the vault `AGENTS.md` and `00-Index.md` before acting, then update affected
+vault records in the same task. The vault is outside repository Git; do not
+initialize Git there or treat it as repository history.

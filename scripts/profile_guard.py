@@ -3,8 +3,9 @@
 
 This helper never launches an application and never deletes a tree.  It is
 intended to operate only on a session-owned temporary scope marked with
-.mfa-profile-guard-scope.  See docs/testing/plan4-packaged-native-preflight.md
-for the operational ordering and the manifest/hash contract.
+.mfa-profile-guard-scope.  The packaged-native preflight evidence record is
+maintained in the owner's local Obsidian workspace; repository AGENTS.md
+provides the vault location and read/update rules.
 """
 
 from __future__ import annotations
