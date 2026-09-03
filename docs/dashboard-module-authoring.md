@@ -180,6 +180,8 @@ actor owns the database and test results are reproducible.
 
 When changing a dashboard contract, update the manifest/schema, component
 page tests, semantic expectation fixture, and
-`docs/superpowers/evidence/analytics-ui.md` together. Record exact commands
-and exit codes. Do not claim native macOS acceptance from this non-foreground
-gate; that is a separate acceptance step.
+the matching project evidence record in the owner's local Obsidian workspace.
+Follow the vault location, read order, and same-task update rules in the
+repository `AGENTS.md`. Record exact commands and exit codes. Do not claim
+native macOS acceptance from this non-foreground gate; that is a separate
+acceptance step.
