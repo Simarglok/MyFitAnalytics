@@ -36,6 +36,11 @@
       "file": "decimal-comma-nbsp.xls",
       "scenario": "decimal comma and NBSP numeric text",
       "sha256": "a822d32ea86959f971ef281dd5262b20d918389d68cc2612f954df1331a9d372"
+    },
+    {
+      "file": "current-schema.xls",
+      "scenario": "current MyNetDiary column profile and combined timestamps",
+      "sha256": "b8e778f5e6a23b46909e143284a2779522ac361a7205291cd7b28299f6a026c3"
     }
   ]
 }

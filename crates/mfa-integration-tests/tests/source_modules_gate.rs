@@ -461,3 +461,83 @@ async fn bundled_mynetdiary_package_runs_through_wasmtime_biff_contract() {
     assert_eq!(batch.extensions.len(), 1);
     assert_eq!(batch.source_records.len(), 8);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bundled_packages_accept_current_export_structures_through_wasmtime() {
+    let temp = TempDir::new().unwrap();
+    let installer = PackageInstaller::new(temp.path().join("module-store"));
+    let hevy = installer.install(&package("hevy.mfasource")).unwrap();
+    let mynetdiary = installer.install(&package("mynetdiary.mfasource")).unwrap();
+    let runtime = ComponentRuntime::new();
+    let source_limits = RuntimeLimits::source_import_default();
+
+    for (asset_id, file_name, bytes) in [
+        (
+            0x7010,
+            "measurement_data.csv",
+            b"date,weight_kg,fat_percent\n\"16 Feb 2026, 00:00\",81.0,18.0\n".to_vec(),
+        ),
+        (
+            0x7011,
+            "workout_data.csv",
+            b"title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,rpe,duration_seconds,notes\nSynthetic Session,\"28 Jun 2026, 15:49\",\"28 Jun 2026, 16:31\",Plank,1,normal,,,,45,\n".to_vec(),
+        ),
+    ] {
+        let asset = Arc::new(MemoryAsset {
+            metadata: AssetMetadata {
+                asset_id: Uuid::from_u128(asset_id),
+                file_name: file_name.to_owned(),
+                media_type: "text/csv".to_owned(),
+                byte_len: bytes.len() as u64,
+            },
+            bytes,
+        });
+        assert!(runtime
+            .validate_source(
+                &hevy,
+                Arc::clone(&asset) as Arc<dyn ReadOnlyAsset>,
+                source_limits,
+            )
+            .await
+            .unwrap()
+            .valid);
+        assert!(!runtime
+            .invoke_source(&hevy, asset, source_limits)
+            .await
+            .unwrap()
+            .records
+            .is_empty());
+    }
+
+    let bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../modules/sources/mynetdiary/tests/fixtures/current-schema.xls"),
+    )
+    .unwrap();
+    let asset = Arc::new(MemoryAsset {
+        metadata: AssetMetadata {
+            asset_id: Uuid::from_u128(0x7012),
+            file_name: "current-export.xls".to_owned(),
+            media_type: "application/vnd.ms-excel".to_owned(),
+            byte_len: bytes.len() as u64,
+        },
+        bytes,
+    });
+    assert!(
+        runtime
+            .validate_source(
+                &mynetdiary,
+                Arc::clone(&asset) as Arc<dyn ReadOnlyAsset>,
+                source_limits,
+            )
+            .await
+            .unwrap()
+            .valid
+    );
+    let batch = runtime
+        .invoke_source(&mynetdiary, asset, source_limits)
+        .await
+        .unwrap();
+    assert_eq!(batch.records.len(), 5);
+    assert_eq!(batch.extensions.len(), 1);
+}

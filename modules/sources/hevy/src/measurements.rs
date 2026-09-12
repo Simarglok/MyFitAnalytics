@@ -210,6 +210,9 @@ fn parse_date(raw: &str, row: usize) -> Result<mfa_contracts::LocalDate, Mapping
         .or_else(|_| {
             NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S").map(|value| value.date())
         })
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(raw, "%d %b %Y, %H:%M").map(|value| value.date())
+        })
         .map_err(|_| MappingError::InvalidDate {
             value: raw.to_owned(),
             row,

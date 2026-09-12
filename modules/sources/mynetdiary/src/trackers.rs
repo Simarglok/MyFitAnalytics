@@ -15,8 +15,13 @@ pub fn map_trackers(
     let mut mapped = MappedRows::default();
     for (data_index, row) in sheet.rows.iter().enumerate() {
         let row_number = sheet.source_row_number(data_index);
-        let (local_date, observed_local_at) =
-            row_local_datetime(&sheet.name, row_number, row, date_column, None)?;
+        let (local_date, observed_local_at) = row_local_datetime(
+            &sheet.name,
+            row_number,
+            row,
+            date_column,
+            sheet.column_index("Time"),
+        )?;
         let source_record_key = add_source_record(&mut mapped, context, sheet, row, data_index);
         if text(sheet, row, "Type") != "Heart Rate" {
             continue;

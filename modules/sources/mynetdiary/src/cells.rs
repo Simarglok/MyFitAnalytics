@@ -33,7 +33,16 @@ impl Cell {
     }
 
     pub fn as_date(&self) -> Option<NaiveDate> {
-        parse_local_date(&self.display)
+        self.as_datetime()
+            .map(|date_time| date_time.date())
+            .or_else(|| parse_local_date(&self.display))
+    }
+
+    pub fn as_datetime(&self) -> Option<NaiveDateTime> {
+        match &self.value {
+            CellValue::DateTime(value) => parse_local_datetime(value),
+            _ => parse_local_datetime(&self.display),
+        }
     }
 }
 
@@ -52,15 +61,31 @@ pub fn parse_number(raw: &str) -> Option<f64> {
 
 pub fn parse_local_date(raw: &str) -> Option<NaiveDate> {
     let value = raw.trim();
-    for format in ["%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S"] {
+    for format in ["%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y"] {
         if let Ok(date) = NaiveDate::parse_from_str(value, format) {
             return Some(date);
         }
-        if let Ok(date_time) = NaiveDateTime::parse_from_str(value, format) {
-            return Some(date_time.date());
-        }
+    }
+    if let Some(date_time) = parse_local_datetime(value) {
+        return Some(date_time.date());
     }
     value
         .get(..10)
         .and_then(|prefix| NaiveDate::parse_from_str(prefix, "%Y-%m-%d").ok())
+}
+
+pub fn parse_local_datetime(raw: &str) -> Option<NaiveDateTime> {
+    let value = raw.trim();
+    [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y %I:%M %p",
+    ]
+    .iter()
+    .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
 }

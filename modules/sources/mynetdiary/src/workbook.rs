@@ -44,6 +44,7 @@ pub fn validate_workbook(bytes: &[u8]) -> Result<WorkbookSchema, MappingError> {
         })?;
     let names = workbook.sheet_names().to_vec();
     let mut sheets = std::collections::BTreeMap::new();
+    let mut selected_profile = None;
     for kind in SheetKind::required()
         .iter()
         .chain(SheetKind::optional().iter())
@@ -70,12 +71,22 @@ pub fn validate_workbook(bytes: &[u8]) -> Result<WorkbookSchema, MappingError> {
             .rows()
             .map(|row| row.iter().map(cell_from_calamine).collect::<Vec<_>>())
             .collect::<Vec<_>>();
-        let (headers, columns) = validate_headers(*kind, kind.workbook_name(), &rows)?;
+        let (profile, headers, columns) = validate_headers(*kind, kind.workbook_name(), &rows)?;
+        if let Some(selected) = selected_profile
+            && selected != profile
+        {
+            return Err(MappingError::MissingColumn {
+                sheet: kind.workbook_name().to_owned(),
+                column: "consistent schema profile".to_owned(),
+            });
+        }
+        selected_profile = Some(profile);
         let data_rows = rows.into_iter().skip(1).collect();
         sheets.insert(
             *kind,
             ValidatedSheet {
                 kind: *kind,
+                profile,
                 name: sheet_name,
                 header_row: 1,
                 headers,
@@ -86,6 +97,7 @@ pub fn validate_workbook(bytes: &[u8]) -> Result<WorkbookSchema, MappingError> {
     }
     let provisional = WorkbookSchema {
         sheets,
+        profile: selected_profile.expect("validated required sheet must choose a profile"),
         calendar_year: 0,
     };
     let calendar_year = infer_calendar_year(&provisional)?;
@@ -166,7 +178,10 @@ fn cell_from_calamine(cell: &Data) -> Cell {
             value: CellValue::Boolean(*value),
         },
         Data::DateTime(value) => {
-            let display = value.to_string();
+            let display = value
+                .as_datetime()
+                .map(|date_time| date_time.to_string())
+                .unwrap_or_else(|| value.to_string());
             Cell {
                 display: display.clone(),
                 value: CellValue::DateTime(display),

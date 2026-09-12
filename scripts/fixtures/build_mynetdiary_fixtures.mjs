@@ -44,6 +44,29 @@ const fullSheets = {
   ],
 };
 
+const currentSheets = {
+  Food: [
+    ["Date & Time", "Name", "Food ID", "Amount", "Calories, cals", "Protein, g", "Total Fat, g", "Total Carbs, g", "Dietary Fiber, g", "Total Sugars, g", "Sodium, mg", "Meal", "Notes"],
+    ["2026-01-04 08:15", "Synthetic Meal", "C-001", "1 serving", "320", "12.5", "8.0", "48.0", "6.0", "9.0", "180", "Breakfast", "fictional current food"],
+  ],
+  Measurements: [
+    ["Date", "Measurement", "Value", "Unit", "Notes"],
+    ["2026-01-04", "Daily Steps Count", "6400", "steps", "fictional current steps"],
+  ],
+  Exercise: [
+    ["Date & Time", "Name", "Amount", "Calories", "Notes"],
+    ["2026-01-04 18:30", "Walking", "ambiguous", "140", "fictional current exercise"],
+  ],
+  Trackers: [
+    ["Date and Time", "Tracker", "Value", "Unit", "Notes"],
+    ["2026-01-04 07:30", "Heart Rate", "128", "bpm", "fictional current tracker"],
+  ],
+  "Water Glasses": [
+    ["Date", "Water, ml", "Water Glasses Count", "Notes"],
+    ["2026-01-04", "500", "2", "fictional current water"],
+  ],
+};
+
 const scenarios = [
   { file: "valid-full.xls", scenario: "all required sheets and optional sheets" },
   { file: "missing-required-sheet.xls", scenario: "Exercise sheet omitted" },
@@ -52,6 +75,7 @@ const scenarios = [
   { file: "mixed-year.xls", scenario: "dates span two calendar years" },
   { file: "unknown-activity.xls", scenario: "governed activity name is unknown" },
   { file: "decimal-comma-nbsp.xls", scenario: "decimal comma and NBSP numeric text" },
+  { file: "current-schema.xls", scenario: "current MyNetDiary column profile and combined timestamps" },
 ];
 
 function cloneSheets(sheets) {
@@ -73,6 +97,7 @@ function writeCsv(file, rows) {
 }
 
 function makeScenario(name) {
+  if (name === "current-schema.xls") return cloneSheets(currentSheets);
   const sheets = cloneSheets(fullSheets);
   if (name === "missing-required-sheet.xls") delete sheets.Exercise;
   if (name === "optional-sheets-absent.xls") {

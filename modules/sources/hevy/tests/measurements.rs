@@ -102,3 +102,17 @@ fn mapping_rejects_non_positive_weight_and_keeps_blank_fat_null() {
     .unwrap_err();
     assert_eq!(error.code(), "hevy.invalid_weight");
 }
+
+#[test]
+fn mapping_accepts_current_hevy_timestamped_dates() {
+    let input = b"date,weight_kg,fat_percent\n\"16 Feb 2026, 00:00\",81.0,18.0\n".to_vec();
+    let batch = parse_measurements(
+        CsvInput::new(input, "current-measurement-asset"),
+        &MappingContext::synthetic("current-measurement-asset"),
+    )
+    .unwrap();
+    let CanonicalObservation::BodyMeasurement(measurement) = &batch.records[0] else {
+        panic!()
+    };
+    assert_eq!(measurement.local_date.to_string(), "2026-02-16");
+}
