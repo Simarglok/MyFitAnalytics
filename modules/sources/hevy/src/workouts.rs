@@ -154,6 +154,7 @@ pub fn context_for_workouts(input: &CsvInput) -> Result<MappingContext, MappingE
         })?;
     let start = NaiveDateTime::parse_from_str(first_start.trim(), "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(first_start.trim(), "%Y-%m-%dT%H:%M:%S"))
+        .or_else(|_| NaiveDateTime::parse_from_str(first_start.trim(), "%d %b %Y, %H:%M"))
         .map_err(|_| MappingError::InvalidDate {
             value: first_start,
             row: 2,
@@ -334,6 +335,7 @@ fn value(headers: &[String], row: &StringRecord, column: &str) -> String {
 fn parse_datetime(raw: &str, row: usize) -> Result<mfa_contracts::LocalDateTime, MappingError> {
     let parsed = NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%dT%H:%M:%S"))
+        .or_else(|_| NaiveDateTime::parse_from_str(raw.trim(), "%d %b %Y, %H:%M"))
         .map_err(|_| MappingError::InvalidDate {
             value: raw.to_owned(),
             row,

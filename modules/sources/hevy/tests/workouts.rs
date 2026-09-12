@@ -131,3 +131,18 @@ Broken,2026-02-03 10:10:00,2026-02-03 10:00:00,Plank,1,normal,,,30,,
     let error = parse_workout_rows(CsvInput::new(input, "broken-asset")).unwrap_err();
     assert_eq!(error.code(), "hevy.invalid_session_time");
 }
+
+#[test]
+fn workouts_accept_current_hevy_timestamps() {
+    let input = b"title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,rpe,duration_seconds,notes\nSynthetic Session,\"28 Jun 2026, 15:49\",\"28 Jun 2026, 16:31\",Plank,1,normal,,,,45,\n".to_vec();
+    let batch = parse_workouts(
+        CsvInput::new(input, "current-workout-asset"),
+        &ExerciseMapping::default(),
+        &MappingContext::for_workouts("current-workout-asset", 2026, "sha256:test".to_owned()),
+    )
+    .unwrap();
+    let CanonicalObservation::WorkoutSession(session) = &batch.records[0] else {
+        panic!()
+    };
+    assert_eq!(session.started_local_at.to_string(), "2026-06-28T15:49:00");
+}

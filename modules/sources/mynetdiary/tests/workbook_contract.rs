@@ -1,5 +1,6 @@
 use mfa_source_mynetdiary::{
-    MappingError, SheetKind, detect_mynetdiary, infer_calendar_year, validate_workbook,
+    MappingError, SchemaProfile, SheetKind, detect_mynetdiary, infer_calendar_year,
+    validate_workbook,
 };
 use std::path::Path;
 
@@ -38,6 +39,7 @@ fn schema_requires_food_measurements_and_exercise_and_infers_content_year() {
     assert!(schema.sheets.contains_key(&SheetKind::Measurements));
     assert!(schema.sheets.contains_key(&SheetKind::Exercise));
     assert_eq!(infer_calendar_year(&schema).unwrap(), 2026);
+    assert_eq!(schema.profile, SchemaProfile::Legacy);
 }
 
 #[test]

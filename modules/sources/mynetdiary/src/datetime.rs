@@ -29,7 +29,26 @@ pub fn row_local_datetime(
     date_column: usize,
     time_column: Option<usize>,
 ) -> Result<(LocalDate, LocalDateTime), MappingError> {
+    if time_column == Some(date_column) {
+        let value = row.get(date_column).cloned().unwrap_or_else(Cell::empty);
+        let date_time = value
+            .as_datetime()
+            .ok_or_else(|| MappingError::InvalidDate {
+                sheet: sheet.to_owned(),
+                row: row_number,
+                value: value.display,
+            })?;
+        return Ok((
+            LocalDate::from(date_time.date()),
+            LocalDateTime::from(date_time),
+        ));
+    }
     let date = row_local_date(sheet, row_number, row, date_column)?;
+    if time_column.is_none()
+        && let Some(date_time) = row.get(date_column).and_then(Cell::as_datetime)
+    {
+        return Ok((date, LocalDateTime::from(date_time)));
+    }
     let time = time_column
         .and_then(|column| row.get(column))
         .and_then(|cell| parse_time(&cell.display))

@@ -25,7 +25,9 @@ pub use activity::map_activity;
 pub use error::MappingError;
 pub use food::map_food;
 pub use measurements::map_measurements;
-pub use schema::{SheetKind, ValidatedSheet, WorkbookSchema as PublicWorkbookSchema};
+pub use schema::{
+    SchemaProfile, SheetKind, ValidatedSheet, WorkbookSchema as PublicWorkbookSchema,
+};
 pub use trackers::map_trackers;
 pub use water::map_water;
 pub use workbook::{detect_mynetdiary, infer_calendar_year, validate_workbook};

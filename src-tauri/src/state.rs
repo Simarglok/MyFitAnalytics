@@ -376,7 +376,7 @@ impl AppState {
             archive,
             database,
             runtime,
-            limits: RuntimeLimits::default(),
+            limits: RuntimeLimits::source_import_default(),
             queue_capacity: 32,
         };
         let coordinator =
